@@ -9,6 +9,15 @@ Funciona com YouTube, YouTube Music, SoundCloud, Vimeo, Instagram, TikTok, X/Twi
 [centenas de outros sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) (usa o [yt-dlp](https://github.com/yt-dlp/yt-dlp) por baixo).
 Não funciona com serviços protegidos contra cópia (DRM), como Netflix, Disney+ e o áudio do Spotify/Deezer.
 
+## Idiomas / Languages / Idiomas
+
+O programa está em **Português**, **English** e **Español**. Na primeira vez ele segue o idioma
+do Windows; para trocar, use a lista no canto de cima da janela (troca na hora, sem reiniciar).
+Os nomes das pastas acompanham o idioma (`Músicas` / `Music` / `Música`).
+
+Para adicionar outro idioma, copie um dos blocos em [`idiomas.py`](idiomas.py), traduza os textos
+e adicione o nome em `LANGUAGES`.
+
 ## Links do Spotify
 
 O Spotify não deixa baixar o áudio, mas dá para colar um link de **música, álbum ou playlist**

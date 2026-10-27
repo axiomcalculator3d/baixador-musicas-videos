@@ -4,7 +4,7 @@ Cole um link (vídeo, música ou playlist), escolha formato e qualidade e baixe.
 Usa yt-dlp por baixo, então funciona com YouTube, YouTube Music, SoundCloud,
 Vimeo, Instagram, TikTok e centenas de outros sites.
 
-Organização na pasta escolhida:
+Organização na pasta escolhida (nomes das pastas no idioma escolhido):
     Músicas/<Artista>/<Música>.mp3      ← só MP3, agrupado por artista
     Outros formatos/<Artista>/<Música>.m4a
     Vídeos/<Título>.mp4                 (playlists numa subpasta com o nome dela)
@@ -36,6 +36,8 @@ except ImportError:  # sem o pacote, a janela Apoiar mostra só os códigos em t
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import DownloadCancelled
 
+from idiomas import LANGUAGES, current_language, set_language, system_language, tr
+
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = APP_DIR / "config.json"
 DEFAULT_FOLDER = Path.home() / "Downloads" / "Baixador"
@@ -44,29 +46,52 @@ DEFAULT_FOLDER = Path.home() / "Downloads" / "Baixador"
 _scripts = Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin")
 os.environ["PATH"] = str(_scripts) + os.pathsep + os.environ.get("PATH", "")
 
+# código da qualidade -> altura máxima do vídeo (None = a maior que houver)
 VIDEO_QUALITIES = {
-    "Melhor disponível": None,
-    "2160p (4K)": 2160,
-    "1440p (2K)": 1440,
-    "1080p (Full HD)": 1080,
-    "720p (HD)": 720,
-    "480p": 480,
-    "360p": 360,
+    "best": None,
+    "2160": 2160,
+    "1440": 1440,
+    "1080": 1080,
+    "720": 720,
+    "480": 480,
+    "360": 360,
 }
+VIDEO_LABELS = {"2160": "2160p (4K)", "1440": "1440p (2K)", "1080": "1080p (Full HD)",
+                "720": "720p (HD)", "480": "480p", "360": "360p"}
 
-# rótulo na tela -> (codec do FFmpeg, qualidade). Qualidade abaixo de 10 é escala VBR (0 = melhor).
+# código da qualidade -> (codec do FFmpeg, qualidade). Qualidade abaixo de 10 é escala VBR (0 = melhor).
 AUDIO_QUALITIES = {
-    "MP3 320 kbps": ("mp3", "320"),
-    "MP3 256 kbps": ("mp3", "256"),
-    "MP3 192 kbps": ("mp3", "192"),
-    "MP3 128 kbps": ("mp3", "128"),
-    "M4A / AAC (original, sem conversão)": ("m4a", None),
-    "OPUS (original, arquivo menor)": ("opus", None),
-    "OGG Vorbis (alta qualidade)": ("vorbis", "1"),
-    "FLAC (sem perda, arquivo grande)": ("flac", None),
-    "WAV (sem compressão, arquivo enorme)": ("wav", None),
+    "mp3_320": ("mp3", "320"),
+    "mp3_256": ("mp3", "256"),
+    "mp3_192": ("mp3", "192"),
+    "mp3_128": ("mp3", "128"),
+    "m4a": ("m4a", None),
+    "opus": ("opus", None),
+    "ogg": ("vorbis", "1"),
+    "flac": ("flac", None),
+    "wav": ("wav", None),
 }
 AUDIO_EXT = {"vorbis": "ogg"}  # extensão do arquivo quando é diferente do nome do codec
+
+# Versões antigas guardavam no config.json o nome que aparecia na tela.
+LEGACY_QUALITIES = {
+    "Melhor disponível": "best", "2160p (4K)": "2160", "1440p (2K)": "1440",
+    "1080p (Full HD)": "1080", "720p (HD)": "720", "480p": "480", "360p": "360",
+    "MP3 320 kbps": "mp3_320", "MP3 256 kbps": "mp3_256", "MP3 192 kbps": "mp3_192",
+    "MP3 128 kbps": "mp3_128", "M4A (melhor, sem conversão)": "m4a",
+    "M4A / AAC (original, sem conversão)": "m4a", "OPUS (original, arquivo menor)": "opus",
+    "OGG Vorbis (alta qualidade)": "ogg", "FLAC (sem perda, arquivo grande)": "flac",
+    "WAV (sem compressão, arquivo enorme)": "wav",
+}
+
+
+def quality_label(quality):
+    if quality in VIDEO_LABELS:
+        return VIDEO_LABELS[quality]
+    if quality.startswith("mp3_"):
+        return f"MP3 {quality[4:]} kbps"
+    return tr(f"q_{quality}")
+
 
 # Tema escuro roxo/rosa com destaques coloridos.
 THEME = {
@@ -110,12 +135,18 @@ LIGHTNING_LNURL = ("LNURL1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7TNHV4KXCT
                    "HHQMRFV93XCETDV4UXJCMPDCERJK07WLP")
 LIGHTNING_ADDRESS = "pliablemexican29@walletofsatoshi.com"
 
-VIDEO_TMPL = "Vídeos/%(title).150B.%(ext)s"
-VIDEO_PLAYLIST_TMPL = "Vídeos/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s"
-MP3_TMPL = "Músicas/%(pasta_artista).80B/%(musica).150B.%(ext)s"
-OTHER_AUDIO_TMPL = "Outros formatos/%(pasta_artista).80B/%(musica).150B.%(ext)s"
 
-UNKNOWN_ARTIST = "Artista desconhecido"
+def output_templates():
+    """Modelos de nome de arquivo, com as pastas no idioma escolhido."""
+    music, videos, other = tr("folder_music"), tr("folder_videos"), tr("folder_other")
+    return {
+        "video": f"{videos}/%(title).150B.%(ext)s",
+        "video_playlist": f"{videos}/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s",
+        "mp3": f"{music}/%(pasta_artista).80B/%(musica).150B.%(ext)s",
+        "other": f"{other}/%(pasta_artista).80B/%(musica).150B.%(ext)s",
+    }
+
+
 # "(Official Video)", "[Clipe Oficial]", "(Lyrics)", "(Áudio)"... saem do nome da música.
 _NOISE = re.compile(
     r"\s*[\(\[][^\)\]]*\b(official|oficial|video|vídeo|clipe|videoclipe|lyrics?|letra|audio|áudio|"
@@ -128,14 +159,14 @@ _SEPARATOR = re.compile(r"^\s*(.+?)\s+[-–—|]\s+(.+)$")
 
 def clean_song(text):
     text = _NOISE.sub("", text or "")
-    return text.strip(" -–—|\"'") or "Sem título"
+    return text.strip(" -–—|\"'") or tr("untitled")
 
 
 def clean_artist(text):
     text = _FEAT.sub("", text or "")
     text = re.sub(r"\s*-\s*Topic$", "", text)  # canais automáticos do YouTube: "Artista - Topic"
     text = re.sub(r"(?<=[a-z])VEVO$", "", text)  # "AdeleVEVO" -> "Adele"
-    return text.strip(" -–—|\"'") or UNKNOWN_ARTIST
+    return text.strip(" -–—|\"'") or tr("unknown_artist")
 
 
 def guess_artist_song(info):
@@ -194,7 +225,7 @@ def read_spotify(url, ydl):
     html = ydl.urlopen(request).read().decode("utf-8", "replace")
     match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
     if not match:
-        raise ValueError("Não consegui ler esse link do Spotify (ele é público?)")
+        raise ValueError(tr("spotify_unreadable"))
     entity = json.loads(match.group(1))["props"]["pageProps"]["state"]["data"]["entity"]
     name = entity.get("name") or entity.get("title") or "Spotify"
     if kind == "track":
@@ -206,33 +237,31 @@ def read_spotify(url, ydl):
 
 # Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros.
 _ERROR_HINTS = [
-    (r"Private video|video is private", "Vídeo privado"),
-    (r"members?[- ]only|Join this channel", "Só para membros do canal"),
-    (r"confirm your age|age[- ]restricted|inappropriate for some users",
-     "Restrição de idade: o YouTube só libera para contas logadas"),
-    (r"not a bot", "O YouTube pediu verificação anti-robô: tente de novo mais tarde"),
-    (r"not available in your country|geo[- ]?restrict", "Bloqueado no seu país"),
-    (r"Video unavailable|This video is unavailable|has been removed|terminated",
-     "Vídeo indisponível ou removido"),
-    (r"Requested format is not available", "A qualidade escolhida não existe para este item"),
-    (r"HTTP Error 403", "O site recusou o acesso (erro 403)"),
-    (r"HTTP Error 404", "Não encontrado no site (erro 404)"),
-    (r"HTTP Error 429|Too Many Requests", "O site bloqueou por excesso de pedidos: tente mais tarde"),
-    (r"Unsupported URL", "Site ou link não suportado"),
-    (r"DRM", "Protegido contra cópia (DRM): não dá para baixar"),
-    (r"timed out|Connection|getaddrinfo|unreachable", "Problema de conexão com a internet"),
-    (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "Falha ao converter o arquivo (FFmpeg)"),
+    (r"Private video|video is private", "err_private"),
+    (r"members?[- ]only|Join this channel", "err_members"),
+    (r"confirm your age|age[- ]restricted|inappropriate for some users", "err_age"),
+    (r"not a bot", "err_bot"),
+    (r"not available in your country|geo[- ]?restrict", "err_geo"),
+    (r"Video unavailable|This video is unavailable|has been removed|terminated", "err_unavailable"),
+    (r"Requested format is not available", "err_format"),
+    (r"HTTP Error 403", "err_403"),
+    (r"HTTP Error 404", "err_404"),
+    (r"HTTP Error 429|Too Many Requests", "err_429"),
+    (r"Unsupported URL", "err_unsupported"),
+    (r"DRM", "err_drm"),
+    (r"timed out|Connection|getaddrinfo|unreachable", "err_network"),
+    (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "err_ffmpeg"),
 ]
 
 
 def explain_error(msg):
     msg = (msg or "").strip()
-    for pattern, text in _ERROR_HINTS:
+    for pattern, key in _ERROR_HINTS:
         if re.search(pattern, msg, re.IGNORECASE):
-            return text
+            return tr(key)
     msg = re.sub(r"^(ERROR:\s*)?(\[[^\]]+\]\s*)?([\w-]{6,}:\s*)?", "", msg)  # "ERROR: [site] id: "
     if not msg:
-        return "Motivo desconhecido"
+        return tr("err_unknown")
     return msg if len(msg) <= 150 else msg[:150] + "…"
 
 
@@ -287,9 +316,10 @@ def save_config(data):
 
 
 def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
+    templates = output_templates()
     opts = {
         # pl_thumbnail vazio: não salva a capa da playlist como arquivo solto.
-        "outtmpl": {"default": VIDEO_TMPL, "pl_thumbnail": ""},
+        "outtmpl": {"default": templates["video"], "pl_thumbnail": ""},
         "paths": {"home": folder},
         "noplaylist": not whole_playlist,
         "ignoreerrors": "only_download",  # um item com erro não derruba a playlist
@@ -315,7 +345,7 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
         codec, kbps = AUDIO_QUALITIES[quality]
         # final_ext faz o yt-dlp pular músicas que já estão na pasta, sem baixar de novo.
         opts["final_ext"] = AUDIO_EXT.get(codec, codec)
-        opts["outtmpl"]["default"] = MP3_TMPL if codec == "mp3" else OTHER_AUDIO_TMPL
+        opts["outtmpl"]["default"] = templates["mp3" if codec == "mp3" else "other"]
         # M4A e OPUS: pega o áudio que já vem nesse formato, assim não precisa converter.
         opts["format"] = {"m4a": "ba[ext=m4a]/ba/b", "opus": "ba[acodec=opus]/ba/b"}.get(codec, "ba/b")
         opts["postprocessors"] = [
@@ -409,27 +439,29 @@ class QueueLogger:
     def info(self, msg):
         if msg.startswith(("[download] Destination", "[ExtractAudio] Destination", "[Merger]",
                            "[download] Downloading item")):
-            self.emit("log", msg)
+            self.emit("log", msg, "")
         elif msg.startswith("[download] ") and msg.endswith("has already been downloaded"):
             path = msg[len("[download] "):-len(" has already been downloaded")]
-            self.emit("log", f"↷ Já existia na pasta, pulando: {Path(path).name}")
+            self.emit("log", tr("already_existed", name=Path(path).name), "warn")
             if self.on_skip:
                 self.on_skip(path_key(path))
 
     def warning(self, msg):
-        self.emit("log", f"Aviso: {msg}")
+        self.emit("log", tr("warning", msg=msg), "warn")
 
     def error(self, msg):
         if self.on_error:
             self.on_error(msg)
         else:
-            self.emit("log", msg)
+            self.emit("log", msg, "error")
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Baixador de Músicas e Vídeos")
+        self.config_data = load_config()
+        set_language(self.config_data.get("language") or system_language())
+        self.title(tr("app_title"))
         self.geometry("780x760")
         self.minsize(660, 640)
 
@@ -441,28 +473,28 @@ class App(tk.Tk):
         self.worker = None
         self.running = False
         self.support_hint_shown = False
-        self.config_data = load_config()
+        self.log_history = []  # (texto, cor) — para refazer o registro ao trocar de idioma
         self.ffmpeg_dir = find_ffmpeg()
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=self.config_data.get("mode", "video"))
         self.quality_var = tk.StringVar()
+        self.quality_ids = {}  # texto na tela -> código da qualidade
         self.folder_var = tk.StringVar(value=self.config_data.get("folder", str(DEFAULT_FOLDER)))
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
-        self.status_var = tk.StringVar(value="Cole um link e clique em Baixar.")
+        self.status_var = tk.StringVar(value=tr("status_ready"))
         self.hint_var = tk.StringVar()
 
         self._setup_style()
         self._build()
         self._dark_title_bar()
-        self._on_mode_change(initial=True)
+        self._fill_qualities(self._saved_quality(self.mode_var.get()))
         self.after(100, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         if not self.ffmpeg_dir:
-            self._log("FFmpeg não encontrado. Rode o iniciar.bat de novo para instalar, "
-                      "senão MP3 e vídeos em alta qualidade não funcionam.")
+            self._log(tr("ffmpeg_missing"), "error")
 
     def _setup_style(self):
         self.configure(bg=THEME["bg"])
@@ -554,14 +586,21 @@ class App(tk.Tk):
             color = "#%02x%02x%02x" % tuple(rgb)
             canvas.create_rectangle(x, 0, x + step, height, fill=color, outline=color, tags="grad")
         canvas.tag_lower("grad")
+        canvas.coords(self.language_item, width - 18, 30)
 
     def _build(self):
         self.header = tk.Canvas(self, height=84, highlightthickness=0, bd=0, bg=THEME["bg"])
         self.header.pack(fill="x")
-        self.header.create_text(26, 30, anchor="w", text="♫  Baixador de Músicas e Vídeos",
+        self.header.create_text(26, 30, anchor="w", text="♫  " + tr("app_title"),
                                 fill="white", font=FONT_TITLE)
-        self.header.create_text(28, 60, anchor="w", fill="#f5eaff", font=FONT,
-                                text="YouTube, Spotify, SoundCloud, Instagram, TikTok… cole o link e pronto.")
+        self.header.create_text(28, 60, anchor="w", fill="#f5eaff", font=FONT, text=tr("subtitle"))
+        self.language_var = tk.StringVar(value=LANGUAGES[current_language()])
+        language_box = ttk.Combobox(self.header, textvariable=self.language_var, state="readonly",
+                                    values=list(LANGUAGES.values()), width=10, font=FONT)
+        language_box.bind("<<ComboboxSelected>>", self._on_language_change)
+        # A rodinha do mouse em cima de uma lista do Tk troca o valor sem querer.
+        language_box.bind("<MouseWheel>", lambda _e: "break")
+        self.language_item = self.header.create_window(0, 30, window=language_box, anchor="e")
         self.header.bind("<Configure>", self._draw_header)
 
         body = tk.Frame(self, bg=THEME["bg"], padx=18, pady=14)
@@ -571,26 +610,26 @@ class App(tk.Tk):
         card.pack(fill="x")
         card.columnconfigure(0, weight=1)
 
-        self._section(card, "LINK").grid(row=0, column=0, sticky="w")
+        self._section(card, tr("sec_link")).grid(row=0, column=0, sticky="w")
         link_row = tk.Frame(card, bg=THEME["card"])
         link_row.grid(row=1, column=0, sticky="ew", pady=(4, 12))
         url_entry = self._entry(link_row, self.url_var)
         url_entry.pack(side="left", fill="x", expand=True, ipady=6)
         url_entry.bind("<Return>", lambda _e: self._start())
         url_entry.focus_set()
-        self._button(link_row, "Colar", self._paste, THEME["field"], THEME["border"],
+        self._button(link_row, tr("paste"), self._paste, THEME["field"], THEME["border"],
                      fg=THEME["cyan"]).pack(side="left", padx=(8, 0))
 
         options_row = tk.Frame(card, bg=THEME["card"])
         options_row.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         format_col = tk.Frame(options_row, bg=THEME["card"])
         format_col.pack(side="left", padx=(0, 24))
-        self._section(format_col, "FORMATO").pack(anchor="w")
+        self._section(format_col, tr("sec_format")).pack(anchor="w")
         toggles = tk.Frame(format_col, bg=THEME["card"])
         toggles.pack(anchor="w", pady=(4, 0))
         self.mode_buttons = {}
-        for value, text, color in (("video", "▶  Vídeo (MP4)", THEME["primary"]),
-                                   ("audio", "♪  Música / Áudio", THEME["pink"])):
+        for value, text, color in (("video", tr("mode_video"), THEME["primary"]),
+                                   ("audio", tr("mode_audio"), THEME["pink"])):
             btn = tk.Radiobutton(toggles, text=text, value=value, variable=self.mode_var,
                                  command=self._on_mode_change, indicatoron=0, selectcolor=color,
                                  bg=THEME["field"], fg=THEME["muted"], activebackground=THEME["border"],
@@ -600,45 +639,46 @@ class App(tk.Tk):
             self.mode_buttons[value] = btn
         quality_col = tk.Frame(options_row, bg=THEME["card"])
         quality_col.pack(side="left", fill="x", expand=True)
-        self._section(quality_col, "QUALIDADE").pack(anchor="w")
+        self._section(quality_col, tr("sec_quality")).pack(anchor="w")
         self.quality_box = ttk.Combobox(quality_col, textvariable=self.quality_var, state="readonly",
                                         font=FONT, width=30)
         self.quality_box.pack(anchor="w", fill="x", pady=(4, 0))
         self.quality_box.bind("<<ComboboxSelected>>", lambda _e: self._update_hint())
+        self.quality_box.bind("<MouseWheel>", lambda _e: "break")
 
-        self._section(card, "SALVAR EM").grid(row=3, column=0, sticky="w")
+        self._section(card, tr("sec_folder")).grid(row=3, column=0, sticky="w")
         folder_row = tk.Frame(card, bg=THEME["card"])
         folder_row.grid(row=4, column=0, sticky="ew", pady=(4, 4))
         self._entry(folder_row, self.folder_var).pack(side="left", fill="x", expand=True, ipady=6)
-        self._button(folder_row, "Escolher…", self._choose_folder, THEME["field"], THEME["border"],
+        self._button(folder_row, tr("choose"), self._choose_folder, THEME["field"], THEME["border"],
                      fg=THEME["cyan"]).pack(side="left", padx=(8, 0))
         tk.Label(card, textvariable=self.hint_var, bg=THEME["card"], fg=THEME["cyan"],
                  font=FONT_SMALL).grid(row=5, column=0, sticky="w", pady=(0, 10))
 
         playlist_row = tk.Frame(card, bg=THEME["card"])
         playlist_row.grid(row=6, column=0, sticky="w")
-        tk.Checkbutton(playlist_row, text="Baixar a playlist inteira", variable=self.playlist_var,
+        tk.Checkbutton(playlist_row, text=tr("whole_playlist"), variable=self.playlist_var,
                        bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
                        activebackground=THEME["card"], activeforeground=THEME["fg"],
                        highlightthickness=0, bd=0, font=FONT, cursor="hand2").pack(side="left")
-        tk.Label(playlist_row, text="     Itens ao mesmo tempo:", bg=THEME["card"], fg=THEME["muted"],
+        tk.Label(playlist_row, text=tr("at_once"), bg=THEME["card"], fg=THEME["muted"],
                  font=FONT).pack(side="left")
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
 
         actions = tk.Frame(body, bg=THEME["bg"])
         actions.pack(fill="x", pady=(14, 10))
-        self.download_btn = self._button(actions, "⬇  Baixar", self._start, THEME["primary"],
+        self.download_btn = self._button(actions, tr("download"), self._start, THEME["primary"],
                                          THEME["primary_hover"])
         self.download_btn.configure(font=FONT_BIG_BOLD, padx=28, pady=9)
         self.download_btn.pack(side="left")
-        self.cancel_btn = self._button(actions, "✖  Cancelar", self._cancel, THEME["pink"],
+        self.cancel_btn = self._button(actions, tr("cancel"), self._cancel, THEME["pink"],
                                        THEME["pink_hover"])
         self.cancel_btn.pack(side="left", padx=10, ipady=2)
         self._set_enabled(self.cancel_btn, False)
-        self._button(actions, "Abrir pasta", self._open_folder, THEME["field"], THEME["border"],
+        self._button(actions, tr("open_folder"), self._open_folder, THEME["field"], THEME["border"],
                      fg=THEME["yellow"]).pack(side="right", ipady=2)
-        self._button(actions, "♥  Apoiar", self._show_support, THEME["field"], THEME["border"],
+        self._button(actions, tr("support"), self._show_support, THEME["field"], THEME["border"],
                      fg=THEME["pink"]).pack(side="right", padx=(0, 8), ipady=2)
 
         self.progress = ttk.Progressbar(body, maximum=100, style="Accent.Horizontal.TProgressbar")
@@ -660,53 +700,85 @@ class App(tk.Tk):
             self.log_text.tag_configure(tag, foreground=color)
         self.log_text.tag_configure("head", foreground=THEME["primary_hover"], font=FONT_MONO_BOLD)
 
-    def _on_mode_change(self, initial=False):
-        if self.mode_var.get() == "video":
-            options = list(VIDEO_QUALITIES)
-            saved = self.config_data.get("video_quality")
-        else:
-            options = list(AUDIO_QUALITIES)
-            saved = self.config_data.get("audio_quality")
+    def _on_language_change(self, _event=None):
+        code = next(c for c, name in LANGUAGES.items() if name == self.language_var.get())
+        if code == current_language():
+            return
+        quality = self._quality_id()
+        progress_value, progress_style = self.progress["value"], str(self.progress["style"])
+        was_ready = self.status_var.get() == tr("status_ready")
+        set_language(code)
+        self.config_data["language"] = code
+        save_config(self.config_data)
+        # Refaz a tela no idioma novo, mantendo o que estava preenchido e o registro.
+        for child in self.winfo_children():
+            child.destroy()
+        self.title(tr("app_title"))
+        self._build()
+        self._fill_qualities(quality)
+        self._set_running(self.running)
+        self.progress.configure(style=progress_style)
+        self.progress["value"] = progress_value
+        if was_ready:
+            self.status_var.set(tr("status_ready"))
+        history, self.log_history = self.log_history, []
+        for msg, tag in history:
+            self._log(msg, tag)
+
+    def _saved_quality(self, mode):
+        saved = self.config_data.get(f"{mode}_quality")
+        return LEGACY_QUALITIES.get(saved, saved)
+
+    def _quality_id(self):
+        return self.quality_ids.get(self.quality_var.get())
+
+    def _fill_qualities(self, selected=None):
+        options = VIDEO_QUALITIES if self.mode_var.get() == "video" else AUDIO_QUALITIES
+        self.quality_ids = {quality_label(q): q for q in options}
         for value, btn in self.mode_buttons.items():
             btn.configure(fg="white" if value == self.mode_var.get() else THEME["muted"])
-        self.quality_box["values"] = options
-        self.quality_var.set(saved if initial is True and saved in options else options[0])
+        self.quality_box["values"] = list(self.quality_ids)
+        if selected not in options:
+            selected = next(iter(options))
+        self.quality_var.set(quality_label(selected))
         self._update_hint()
 
+    def _on_mode_change(self):
+        self._fill_qualities()
+
     def _update_hint(self):
+        quality = self._quality_id() or ""
         if self.mode_var.get() == "video":
-            hint = "Vídeos vão para a pasta Vídeos (playlists numa subpasta com o nome delas)."
-        elif self.quality_var.get().startswith("MP3"):
-            hint = "MP3 vão para Músicas\\<Artista>\\<Música>.mp3 — cada artista na sua pasta."
+            hint = tr("hint_video", videos=tr("folder_videos"))
+        elif quality.startswith("mp3"):
+            hint = tr("hint_mp3", music=tr("folder_music"))
         else:
-            name = self.quality_var.get().split(" ")[0]
-            hint = f"{name} vai para Outros formatos\\<Artista>\\ (separado dos MP3)."
-            if name in ("FLAC", "WAV"):
-                hint += " A qualidade é a mesma da fonte (o YouTube não tem áudio sem perda)."
+            hint = tr("hint_other", fmt=self.quality_var.get().split(" ")[0], other=tr("folder_other"))
+            if quality in ("flac", "wav"):
+                hint += tr("hint_lossless")
         self.hint_var.set(hint)
 
     def _show_support(self):
         win = tk.Toplevel(self)
-        win.title("Apoie o projeto")
+        win.title(tr("support_window"))
         win.configure(bg=THEME["bg"])
         win.resizable(False, False)
         win.transient(self)
-        tk.Label(win, text="♥  Apoie o Baixador", bg=THEME["bg"], fg=THEME["pink"],
+        tk.Label(win, text=tr("support_title"), bg=THEME["bg"], fg=THEME["pink"],
                  font=FONT_TITLE).pack(padx=24, pady=(18, 4))
-        tk.Label(win, text="Se o programa te ajudou, considere uma contribuição de qualquer valor.\n"
-                           "Isso ajuda a manter e melhorar o projeto. Obrigado!",
-                 bg=THEME["bg"], fg=THEME["fg"], font=FONT, justify="center").pack(padx=24)
+        tk.Label(win, text=tr("support_text"), bg=THEME["bg"], fg=THEME["fg"], font=FONT,
+                 justify="center").pack(padx=24)
         cards = tk.Frame(win, bg=THEME["bg"])
         cards.pack(padx=18, pady=(14, 6))
         feedback = tk.StringVar()
         pix = pix_copia_e_cola(PIX_KEY, PIX_NAME, PIX_CITY)
-        self._support_card(cards, "Pix", pix, "Escaneie com o app do seu banco", THEME["green"],
-                           feedback, [("Copiar Pix copia e cola", pix)])
+        self._support_card(cards, "Pix", pix, tr("pix_scan"), THEME["green"], feedback,
+                           [(tr("copy_pix"), pix)])
         if LIGHTNING_LNURL:
             self._support_card(cards, "⚡ Bitcoin Lightning", LIGHTNING_LNURL,
                                LIGHTNING_ADDRESS, THEME["yellow"], feedback,
-                               [("Copiar endereço Lightning", LIGHTNING_ADDRESS),
-                                ("Copiar LNURL", LIGHTNING_LNURL)])
+                               [(tr("copy_ln_address"), LIGHTNING_ADDRESS),
+                                (tr("copy_lnurl"), LIGHTNING_LNURL)])
         tk.Label(win, textvariable=feedback, bg=THEME["bg"], fg=THEME["green"],
                  font=FONT_BOLD).pack(pady=(0, 14))
         if os.name == "nt":
@@ -719,13 +791,13 @@ class App(tk.Tk):
         self._qr_canvas(card, qr_data).pack(pady=10)
         tk.Label(card, text=subtitle, bg=THEME["card"], fg=THEME["muted"], font=FONT_SMALL).pack()
         for label, text in copies:
-            self._button(card, label, lambda t=text, lb=label: self._copy(t, lb, feedback),
+            self._button(card, label, lambda t=text: self._copy(t, feedback),
                          THEME["field"], THEME["border"], fg=color).pack(fill="x", pady=(6, 0))
 
     def _qr_canvas(self, parent, data, size=220):
         if qrcode is None:
-            return tk.Label(parent, text="(QR Code indisponível:\nrode o iniciar.bat de novo)",
-                            bg=THEME["card"], fg=THEME["muted"], font=FONT_SMALL)
+            return tk.Label(parent, text=tr("qr_missing"), bg=THEME["card"], fg=THEME["muted"],
+                            font=FONT_SMALL)
         qr = qrcode.QRCode(border=3, error_correction=qrcode.constants.ERROR_CORRECT_M)
         qr.add_data(data)
         qr.make(fit=True)
@@ -740,11 +812,11 @@ class App(tk.Tk):
                                             fill="black", outline="")
         return canvas
 
-    def _copy(self, text, label, feedback):
+    def _copy(self, text, feedback):
         self.clipboard_clear()
         self.clipboard_append(text)
         self.update()
-        feedback.set(f"✔ Copiado: {label.replace('Copiar ', '')}")
+        feedback.set(tr("copied"))
 
     def _paste(self):
         try:
@@ -765,21 +837,10 @@ class App(tk.Tk):
         else:
             subprocess.Popen(["xdg-open" if sys.platform != "darwin" else "open", str(folder)])
 
-    def _log(self, msg):
-        if msg.startswith(("\n===", "===")):
-            tag = "head"
-        elif msg.startswith(("✔", "Concluído")):
-            tag = "ok"
-        elif msg.startswith(("↷", "Aviso", "Esse arquivo")):
-            tag = "warn"
-        elif msg.startswith(("✖", "Erro", "ERROR", "Falhou", "FFmpeg não")):
-            tag = "error"
-        elif msg.startswith(("Playlist", "Baixando a lista", "Spotify")):
-            tag = "info"
-        elif msg.startswith(("Cancelado", "♥")):
-            tag = "cancel"
-        else:
-            tag = ""
+    def _log(self, msg, tag=""):
+        """tag escolhe a cor: ok (verde), warn (amarelo), error (vermelho), info (azul),
+        cancel (rosa), head (título roxo) ou "" (cinza)."""
+        self.log_history.append((msg, tag))
         self.log_text.configure(state="normal")
         self.log_text.insert("end", msg + "\n", tag)
         self.log_text.see("end")
@@ -795,15 +856,15 @@ class App(tk.Tk):
             return
         url = self.url_var.get().strip()
         if not url.startswith(("http://", "https://")):
-            messagebox.showwarning("Link inválido", "Cole um link que comece com http:// ou https://")
+            messagebox.showwarning(tr("invalid_link_title"), tr("invalid_link"))
             return
         folder = self.folder_var.get().strip() or str(DEFAULT_FOLDER)
         Path(folder).mkdir(parents=True, exist_ok=True)
 
-        mode, quality = self.mode_var.get(), self.quality_var.get()
+        mode, quality = self.mode_var.get(), self._quality_id()
         workers = max(1, min(8, self.workers_var.get()))
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
-                                 "workers": workers})
+                                 "workers": workers, "language": current_language()})
         save_config(self.config_data)
 
         opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
@@ -812,8 +873,8 @@ class App(tk.Tk):
         self._set_running(True)
         self.progress.configure(style="Accent.Horizontal.TProgressbar")
         self.progress["value"] = 0
-        self.status_var.set("Buscando informações do link…")
-        self._log(f"\n=== {url} ({quality}) ===")
+        self.status_var.set(tr("status_fetching"))
+        self._log(f"\n=== {url} ({self.quality_var.get()}) ===", "head")
 
         self.worker = threading.Thread(
             target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts, workers), daemon=True)
@@ -827,8 +888,8 @@ class App(tk.Tk):
         self._set_running(False)
         self.progress.configure(style="Cancel.Horizontal.TProgressbar")
         self.progress["value"] = 100
-        self.status_var.set("Cancelado. As músicas/vídeos que já terminaram continuam na pasta.")
-        self._log("Cancelado pelo usuário.")
+        self.status_var.set(tr("status_cancelled"))
+        self._log(tr("log_cancelled"), "cancel")
 
     def _run(self, run_id, cancel, url, mode, opts, workers):
         done, skipped, repeated = [], [], []
@@ -851,7 +912,8 @@ class App(tk.Tk):
 
         def overall():
             """Em playlists a barra mostra quantos itens já ficaram prontos."""
-            return len(finished) / total["n"] * 100, f"[{len(finished)}/{total['n']} prontos] "
+            return (len(finished) / total["n"] * 100,
+                    tr("ready_count", done=len(finished), total=total["n"]))
 
         def progress_hook(d):
             check_cancel()
@@ -863,9 +925,9 @@ class App(tk.Tk):
                 pct = d["downloaded_bytes"] / size * 100 if size else 0
                 speed = d.get("speed")
                 speed_txt = f" — {speed / 1_048_576:.1f} MB/s" if speed else ""
-                text = f"Baixando: {title} ({pct:.0f}%){speed_txt}"
+                text = tr("downloading", title=title, pct=pct, speed=speed_txt)
             elif d["status"] == "finished":
-                pct, text = 100, f"Convertendo: {title}"
+                pct, text = 100, tr("converting", title=title)
             else:
                 return
             if total["n"] > 1:
@@ -887,7 +949,7 @@ class App(tk.Tk):
                     skipped.append(name)
                     return
                 done.append(name)
-                emit("log", f"✔ {name}")
+                emit("log", f"✔ {name}", "ok")
 
         def on_error(msg):
             local.error = msg
@@ -904,7 +966,7 @@ class App(tk.Tk):
 
         def fail(index, name, reason):
             failures.append((index, name, reason))
-            emit("log", f"✖ {f'Item {index}: ' if index else ''}{name} — {reason}")
+            emit("log", f"✖ {f'#{index}: ' if index else ''}{name} — {reason}", "error")
 
         def download_entry(index, entry, extra):
             local.file, local.ok, local.error = None, False, None
@@ -917,14 +979,14 @@ class App(tk.Tk):
                         found = ydl.extract_info(entry["url"], download=False, process=False)
                         results = [r for r in (found or {}).get("entries") or [] if r]
                         if not results:
-                            raise LookupError("Não encontrei essa música no YouTube")
+                            raise LookupError(tr("not_found_youtube"))
                         target = results[0]
                     ydl.extract_info(target.get("url") or target.get("webpage_url"),
                                      ie_key=target.get("ie_key"), extra_info=extra)
             except AlreadyInThisRun as exc:
                 local.ok = True
                 repeated.append(str(exc))
-                emit("log", f"↷ Repetida na lista (já baixada agora há pouco): {exc}")
+                emit("log", tr("repeated_now", name=exc), "warn")
             except DownloadCancelled:
                 cancelled = True
             except Exception as exc:  # noqa: BLE001 — vira um item da lista de erros
@@ -945,20 +1007,19 @@ class App(tk.Tk):
             entries, is_list, probe = None, True, None
             spotify = SPOTIFY_LINK.search(url)
             if spotify:
-                emit("progress", 0, "Lendo a lista de músicas do Spotify…")
+                emit("progress", 0, tr("reading_spotify"))
                 kind, title, tracks = read_spotify(url, main_ydl)
                 if not tracks:
-                    raise ValueError("Esse link do Spotify não tem músicas visíveis (ele é público?)")
+                    raise ValueError(tr("spotify_empty"))
                 suffix = " audio" if mode == "audio" else ""
                 entries = [{"search": True, "title": f"{artist} - {song}",
                             "url": f"ytsearch1:{artist} - {song}{suffix}",
                             "extra": {"spotify_artist": artist, "spotify_title": song}}
                            for artist, song in tracks]
                 is_list = kind != "track"
-                emit("log", f"Spotify: {title} ({len(entries)} música(s)) — procurando cada uma no YouTube")
+                emit("log", tr("spotify_found", title=title, n=len(entries)), "info")
                 if len(tracks) >= SPOTIFY_EMBED_LIMIT:
-                    emit("log", f"Aviso: o Spotify só mostra as primeiras {SPOTIFY_EMBED_LIMIT} músicas "
-                                "de um link. Para playlists maiores, divida em playlists menores.")
+                    emit("log", tr("spotify_limit", n=SPOTIFY_EMBED_LIMIT), "warn")
             else:
                 # Busca as informações do link uma vez só (process=False: sem escolher formato
                 # nem baixar). Se for um item, o mesmo ydl reaproveita essas informações no
@@ -974,10 +1035,11 @@ class App(tk.Tk):
                     # Itens em paralelo só quando a lista traz links (o normal no YouTube);
                     # se o site já entregou os itens prontos, baixa na ordem pelo próprio yt-dlp.
                     if all(e.get("_type") in ("url", "url_transparent") for e in entries):
-                        emit("log", f"Playlist: {title} ({len(entries)} itens) — baixando {workers} por vez")
+                        emit("log", tr("playlist_found", title=title, n=len(entries), workers=workers),
+                             "info")
                     else:
                         entries = None
-                        emit("log", "Baixando a lista em ordem, um item por vez.")
+                        emit("log", tr("sequential"), "info")
             check_cancel()
 
             if entries is not None:
@@ -993,13 +1055,13 @@ class App(tk.Tk):
                     seen.add(key)
                     unique.append(entry)
                 if len(unique) < len(entries):
-                    emit("log", f"↷ {len(entries) - len(unique)} item(ns) repetido(s) na lista — "
-                                "cada música é baixada uma vez só.")
+                    emit("log", tr("repeated_skipped", n=len(entries) - len(unique)), "warn")
                 entries = unique
                 total["n"] = max(1, len(entries))
-                emit("progress", 0, f"[0/{len(entries)} prontos] Começando…")
+                emit("progress", 0, tr("ready_count", done=0, total=len(entries)) + tr("starting"))
                 if mode == "video" and is_list:
-                    opts = dict(opts, outtmpl={**opts["outtmpl"], "default": VIDEO_PLAYLIST_TMPL})
+                    opts = dict(opts, outtmpl={**opts["outtmpl"],
+                                               "default": output_templates()["video_playlist"]})
                 list_info = {"playlist": title, "playlist_title": title,
                              "n_entries": len(entries), "playlist_count": len(entries)}
                 with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1009,14 +1071,15 @@ class App(tk.Tk):
                             extra.update(list_info, playlist_index=index)
                         pool.submit(download_entry, index, entry, extra)
                 check_cancel()
-                summary = f"Concluído: {len(done)} baixado(s)"
+                summary = tr("sum_done", n=len(done))
                 if skipped:
-                    summary += f", {len(skipped)} já existia(m) na pasta"
+                    summary += tr("sum_skipped", n=len(skipped))
                 if repeated:
-                    summary += f", {len(repeated)} repetida(s) na lista"
+                    summary += tr("sum_repeated", n=len(repeated))
                 if failures:
-                    summary += f", {len(failures)} com erro (lista abaixo)"
-                summary += f" — de {list_size} itens em {format_duration(time.time() - started)}."
+                    summary += tr("sum_failed", n=len(failures))
+                summary += tr("sum_total", n=list_size, time=format_duration(time.time() - started))
+                failed = False
             else:
                 local.file, local.ok, local.error = None, False, None
                 cancelled, error = False, None
@@ -1031,25 +1094,26 @@ class App(tk.Tk):
                     if local.file:
                         remove_partial_files(local.file, started)
                     return
+                failed = False
                 if done:
-                    summary = f"Concluído em {format_duration(time.time() - started)}!"
+                    summary = tr("done_single", time=format_duration(time.time() - started))
                 elif skipped:
-                    summary = "Esse arquivo já estava na pasta."
+                    summary = tr("already_single")
                 else:
                     reason = explain_error(local.error or error)
                     failures.append((None, probe.get("title") or url, reason))
-                    summary = f"Falhou: {reason}"
-            emit("done", summary)
+                    summary, failed = tr("failed", reason=reason), True
+            emit("done", summary, failed)
             if failures and total["n"] > 1:
-                emit("log", f"✖ Itens com erro ({len(failures)}):")
+                emit("log", tr("errors_header", n=len(failures)), "error")
                 for index, name, reason in sorted(failures, key=lambda f: f[0] or 0):
-                    emit("log", f"✖    {index}. {name} — {reason}")
+                    emit("log", f"✖    {index}. {name} — {reason}", "error")
         except DownloadCancelled:
             pass
         except Exception as exc:  # noqa: BLE001 — qualquer erro do yt-dlp vai para a tela
             reason = explain_error(local.__dict__.get("error") or str(exc))
-            emit("log", f"✖ {reason}")
-            emit("done", f"Falhou: {reason}")
+            emit("log", f"✖ {reason}", "error")
+            emit("done", tr("failed", reason=reason), True)
 
     def _poll_events(self):
         try:
@@ -1058,33 +1122,31 @@ class App(tk.Tk):
                 if run_id != self.run_id:
                     continue  # evento de um download já cancelado
                 if kind == "log":
-                    self._log(data[0])
+                    self._log(*data)
                 elif kind == "progress":
                     self.progress["value"] = data[0]
                     self.status_var.set(data[1])
                 elif kind == "done":
-                    failed = data[0].startswith("Falhou")
+                    summary, failed = data
                     self.progress.configure(
                         style=f"{'Error' if failed else 'Done'}.Horizontal.TProgressbar")
                     self.progress["value"] = 100
-                    self.status_var.set(data[0])
-                    self._log(data[0])
+                    self.status_var.set(summary)
+                    self._log(summary, "error" if failed else "ok")
                     self._set_running(False)
                     if not failed and not self.support_hint_shown:  # uma vez por sessão
                         self.support_hint_shown = True
-                        self._log("♥ O programa te ajudou? Apoie com Pix ou Bitcoin, de qualquer valor, "
-                                  "no botão Apoiar. Obrigado!")
+                        self._log(tr("support_hint"), "cancel")
         except queue.Empty:
             pass
         self.after(100, self._poll_events)
 
     def _on_close(self):
         if self.running:
-            if not messagebox.askyesno("Sair", "Há um download em andamento. Sair mesmo assim?"):
+            if not messagebox.askyesno(tr("quit_title"), tr("quit_running")):
                 return
             self.cancel_event.set()
         self.destroy()
-
 
 
 if __name__ == "__main__":
