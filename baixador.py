@@ -253,8 +253,10 @@ def read_spotify(url, ydl):
     return kind, name, [(a.replace("\xa0", " ").strip(), t.strip()) for a, t in tracks if t]
 
 
-# Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros.
+# Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros. A ordem importa:
+# o bloqueio por excesso de downloads também começa com "Video unavailable".
 _ERROR_HINTS = [
+    (r"try again later|rate-limited", "err_ratelimit"),
     (r"Private video|video is private", "err_private"),
     (r"members?[- ]only|Join this channel", "err_members"),
     (r"confirm your age|age[- ]restricted|inappropriate for some users", "err_age"),
@@ -272,11 +274,18 @@ _ERROR_HINTS = [
 ]
 
 
+def error_kind(msg):
+    for pattern, key in _ERROR_HINTS:
+        if re.search(pattern, msg or "", re.IGNORECASE):
+            return key
+    return None
+
+
 def explain_error(msg):
     msg = (msg or "").strip()
-    for pattern, key in _ERROR_HINTS:
-        if re.search(pattern, msg, re.IGNORECASE):
-            return tr(key)
+    key = error_kind(msg)
+    if key:
+        return tr(key)
     msg = re.sub(r"^(ERROR:\s*)?(\[[^\]]+\]\s*)?([\w-]{6,}:\s*)?", "", msg)  # "ERROR: [site] id: "
     if not msg:
         return tr("err_unknown")
@@ -959,6 +968,9 @@ class App(tk.Tk):
         failures = []  # (posição, nome, motivo) — viram a lista de erros no final
         skipped_files = set()  # arquivos (caminho completo) que já estavam na pasta antes
         claimed, claim_lock = set(), threading.Lock()  # arquivos que algum item desta lista já pegou
+        # Quando o YouTube limita o computador (até 1 hora), todo pedido seguinte falha também:
+        # os itens que ainda não começaram ficam para depois em vez de virar uma lista de erros.
+        rate_limited, postponed = threading.Event(), []
         # Cada download paralelo guarda aqui o arquivo em que está mexendo, se terminou (ok)
         # e a última mensagem de erro do yt-dlp.
         local = threading.local()
@@ -1031,6 +1043,10 @@ class App(tk.Tk):
             emit("log", f"✖ {f'#{index}: ' if index else ''}{name} — {reason}", "error")
 
         def download_entry(index, entry, extra):
+            if rate_limited.is_set():
+                postponed.append(index)
+                finished.append(index)
+                return
             local.file, local.ok, local.error = None, False, None
             cancelled, error = False, None
             try:
@@ -1055,6 +1071,8 @@ class App(tk.Tk):
                 error = str(exc)
             finished.append(index)
             if not cancelled and not local.ok:
+                if error_kind(local.error or error) == "err_ratelimit":
+                    rate_limited.set()
                 fail(index, entry.get("title") or entry.get("url") or "?",
                      explain_error(local.error or error))
             if not cancelled and total["n"] > 1:
@@ -1140,6 +1158,8 @@ class App(tk.Tk):
                     summary += tr("sum_repeated", n=len(repeated))
                 if failures:
                     summary += tr("sum_failed", n=len(failures))
+                if postponed:
+                    summary += tr("sum_postponed", n=len(postponed))
                 summary += tr("sum_total", n=list_size, time=format_duration(time.time() - started))
                 failed = False
             else:
@@ -1165,11 +1185,13 @@ class App(tk.Tk):
                     reason = explain_error(local.error or error)
                     failures.append((None, probe.get("title") or url, reason))
                     summary, failed = tr("failed", reason=reason), True
-            emit("done", summary, failed)
+            emit("done", summary, failed, not failures and not postponed)
             if failures and total["n"] > 1:
                 emit("log", tr("errors_header", n=len(failures)), "error")
                 for index, name, reason in sorted(failures, key=lambda f: f[0] or 0):
                     emit("log", f"✖    {index}. {name} — {reason}", "error")
+            if rate_limited.is_set() or any(r == tr("err_ratelimit") for _i, _n, r in failures):
+                emit("log", tr("ratelimit_help"), "warn")
         except DownloadCancelled:
             pass
         except Exception as exc:  # noqa: BLE001 — qualquer erro do yt-dlp vai para a tela
@@ -1192,14 +1214,15 @@ class App(tk.Tk):
                     self.progress["value"] = data[0]
                     self.status_var.set(data[1])
                 elif kind == "done":
-                    summary, failed = data
+                    summary, failed, *rest = data
+                    all_ok = rest[0] if rest else not failed
                     self.progress.configure(
                         style=f"{'Error' if failed else 'Done'}.Horizontal.TProgressbar")
                     self.progress["value"] = 100
                     self.status_var.set(summary)
                     self._log(summary, "error" if failed else "ok")
                     self._set_running(False)
-                    if not failed and not self.support_hint_shown:  # uma vez por sessão
+                    if all_ok and not self.support_hint_shown:  # uma vez por sessão, só se deu tudo certo
                         self.support_hint_shown = True
                         self._log(tr("support_hint"), "cancel")
         except queue.Empty:

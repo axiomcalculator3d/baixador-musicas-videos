@@ -113,6 +113,11 @@ TEXTS = {
         "err_network": "Problema de conexão com a internet",
         "err_ffmpeg": "Falha ao converter o arquivo (FFmpeg)",
         "err_unknown": "Motivo desconhecido",
+        "err_ratelimit": "O YouTube limitou este computador por excesso de downloads (até 1 hora)",
+        "sum_postponed": ", {n} não tentado(s) por causa do limite do YouTube",
+        "ratelimit_help": "⏸ Sem login, o YouTube aceita cerca de 300 vídeos por hora por computador. "
+                          "Espere de 30 a 60 minutos e baixe a mesma lista de novo: o que já foi "
+                          "baixado é pulado e só o que faltou é baixado.",
     },
     "en": {
         "app_title": "Music & Video Downloader",
@@ -218,6 +223,11 @@ TEXTS = {
         "err_network": "Internet connection problem",
         "err_ffmpeg": "Failed to convert the file (FFmpeg)",
         "err_unknown": "Unknown reason",
+        "err_ratelimit": "YouTube rate-limited this computer for too many downloads (up to 1 hour)",
+        "sum_postponed": ", {n} not tried because of YouTube's limit",
+        "ratelimit_help": "⏸ Without signing in, YouTube allows about 300 videos per hour per computer. "
+                          "Wait 30 to 60 minutes and download the same list again: what was already "
+                          "downloaded is skipped and only what's missing is downloaded.",
     },
     "es": {
         "app_title": "Descargador de Música y Videos",
@@ -324,6 +334,11 @@ TEXTS = {
         "err_network": "Problema de conexión a internet",
         "err_ffmpeg": "Error al convertir el archivo (FFmpeg)",
         "err_unknown": "Motivo desconocido",
+        "err_ratelimit": "YouTube limitó este equipo por exceso de descargas (hasta 1 hora)",
+        "sum_postponed": ", {n} sin intentar por el límite de YouTube",
+        "ratelimit_help": "⏸ Sin iniciar sesión, YouTube permite unos 300 videos por hora por equipo. "
+                          "Espera de 30 a 60 minutos y descarga la misma lista de nuevo: lo que ya se "
+                          "descargó se omite y solo se descarga lo que faltó.",
     },
 }
 
