@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -62,7 +63,7 @@ UNKNOWN_ARTIST = "Artista desconhecido"
 # "(Official Video)", "[Clipe Oficial]", "(Lyrics)", "(Áudio)"... saem do nome da música.
 _NOISE = re.compile(
     r"\s*[\(\[][^\)\]]*\b(official|oficial|video|vídeo|clipe|videoclipe|lyrics?|letra|audio|áudio|"
-    r"visuali[sz]er|hd|4k|mv|m/v)\b[^\)\]]*[\)\]]",
+    r"visuali[sz]er|hd|4k|mv|m/v|legendado|legenda|traduçã?o|traduzido)\b[^\)\]]*[\)\]]",
     re.IGNORECASE,
 )
 _FEAT = re.compile(r"\s+(feat\.?|ft\.?|featuring|part\.?|participação)\s+.*$", re.IGNORECASE)
@@ -126,7 +127,7 @@ def find_ffmpeg():
 
 def load_config():
     try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
 
@@ -149,6 +150,10 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
         "windowsfilenames": True,
         "overwrites": False,
         "continuedl": True,
+        # Velocidade: o YouTube limita conexões longas; pedir o arquivo em pedaços de 10 MB
+        # evita esse limite. Sites que entregam em fragmentos (HLS/DASH) baixam 4 por vez.
+        "http_chunk_size": 10 * 1024 * 1024,
+        "concurrent_fragment_downloads": 4,
     }
     if ffmpeg_dir:
         opts["ffmpeg_location"] = ffmpeg_dir
@@ -208,6 +213,11 @@ def remove_partial_files(final_path, since):
         pass
 
 
+def format_duration(seconds):
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes} min {seconds:02d} s" if minutes else f"{seconds} s"
+
+
 def glob_escape(text):
     return re.sub(r"([\[\]\*\?])", r"[\1]", text)
 
@@ -262,6 +272,7 @@ class App(tk.Tk):
         self.quality_var = tk.StringVar()
         self.folder_var = tk.StringVar(value=self.config_data.get("folder", str(DEFAULT_FOLDER)))
         self.playlist_var = tk.BooleanVar(value=True)
+        self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
         self.status_var = tk.StringVar(value="Cole um link e clique em Baixar.")
         self.hint_var = tk.StringVar()
 
@@ -306,8 +317,14 @@ class App(tk.Tk):
         ttk.Label(frm, textvariable=self.hint_var, foreground="#555").grid(
             row=4, column=1, columnspan=2, sticky="w", padx=10)
 
-        ttk.Checkbutton(frm, text="Se o link for de uma playlist, baixar a playlist inteira",
-                        variable=self.playlist_var).grid(row=5, column=1, columnspan=2, sticky="w", **pad)
+        playlist_row = ttk.Frame(frm)
+        playlist_row.grid(row=5, column=1, columnspan=2, sticky="w", **pad)
+        ttk.Checkbutton(playlist_row, text="Se o link for de uma playlist, baixar a playlist inteira",
+                        variable=self.playlist_var).pack(side="left")
+        ttk.Label(playlist_row, text="   Baixar").pack(side="left")
+        ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
+                    state="readonly").pack(side="left", padx=4)
+        ttk.Label(playlist_row, text="ao mesmo tempo").pack(side="left")
 
         buttons = ttk.Frame(frm)
         buttons.grid(row=6, column=0, columnspan=3, sticky="ew", **pad)
@@ -391,7 +408,9 @@ class App(tk.Tk):
         Path(folder).mkdir(parents=True, exist_ok=True)
 
         mode, quality = self.mode_var.get(), self.quality_var.get()
-        self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality})
+        workers = max(1, min(8, self.workers_var.get()))
+        self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
+                                 "workers": workers})
         save_config(self.config_data)
 
         opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
@@ -403,7 +422,7 @@ class App(tk.Tk):
         self._log(f"\n=== {url} ({quality}) ===")
 
         self.worker = threading.Thread(
-            target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts), daemon=True)
+            target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts, workers), daemon=True)
         self.worker.start()
 
     def _cancel(self):
@@ -416,11 +435,12 @@ class App(tk.Tk):
         self.status_var.set("Cancelado. As músicas/vídeos que já terminaram continuam na pasta.")
         self._log("Cancelado pelo usuário.")
 
-    def _run(self, run_id, cancel, url, mode, opts):
+    def _run(self, run_id, cancel, url, mode, opts, workers):
         done, skipped = [], []
+        finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
         skipped_files = set()  # nomes que o yt-dlp avisou que já estavam na pasta
-        cancelled = False
-        current = {"file": None}
+        local = threading.local()  # cada download paralelo guarda o arquivo em que está mexendo
+        total = {"n": 1}
         started = time.time()
 
         def emit(kind, *data):
@@ -430,29 +450,36 @@ class App(tk.Tk):
             if cancel.is_set():
                 raise DownloadCancelled("cancelado pelo usuário")
 
+        def overall():
+            """Em playlists a barra mostra quantos itens já ficaram prontos."""
+            return len(finished) / total["n"] * 100, f"[{len(finished)}/{total['n']} prontos] "
+
         def progress_hook(d):
             check_cancel()
             info = d.get("info_dict", {})
-            current["file"] = info.get("_filename") or d.get("filename")
-            prefix = ""
-            if info.get("playlist_index") and info.get("n_entries"):
-                prefix = f"[{info['playlist_index']}/{info['n_entries']}] "
+            local.file = info.get("_filename") or d.get("filename")
             title = info.get("musica") or info.get("title", "")
             if d["status"] == "downloading":
-                total = d.get("total_bytes") or d.get("total_bytes_estimate")
-                pct = d["downloaded_bytes"] / total * 100 if total else 0
+                size = d.get("total_bytes") or d.get("total_bytes_estimate")
+                pct = d["downloaded_bytes"] / size * 100 if size else 0
                 speed = d.get("speed")
                 speed_txt = f" — {speed / 1_048_576:.1f} MB/s" if speed else ""
-                emit("progress", pct, f"{prefix}Baixando: {title} ({pct:.0f}%){speed_txt}")
+                text = f"Baixando: {title} ({pct:.0f}%){speed_txt}"
             elif d["status"] == "finished":
-                emit("progress", 100, f"{prefix}Processando: {title}")
+                pct, text = 100, f"Convertendo: {title}"
+            else:
+                return
+            if total["n"] > 1:
+                pct, prefix = overall()
+                text = prefix + text
+            emit("progress", pct, text)
 
         def postprocessor_hook(d):
             check_cancel()
             # MoveFiles é o último passo de cada item: o arquivo final já está na pasta.
             if d["status"] == "finished" and d["postprocessor"] == "MoveFiles":
                 info = d["info_dict"]
-                current["file"] = None
+                local.file = None
                 name = info.get("musica") or info.get("title", "?")
                 if info.get("pasta_artista"):
                     name = f"{info['pasta_artista']} — {name}"
@@ -462,54 +489,99 @@ class App(tk.Tk):
                 done.append(name)
                 emit("log", f"✔ {name}")
 
-        def match_filter(info, *, incomplete=False):
-            check_cancel()  # chamado antes de cada item da playlist
-            return None
+        def new_ydl():
+            ydl = yt_dlp.YoutubeDL(dict(
+                opts, logger=QueueLogger(emit, on_skip=skipped_files.add),
+                progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook]))
+            if mode == "audio":
+                ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
+            return ydl
+
+        def download_entry(entry, extra):
+            local.file = None
+            cancelled = False
+            try:
+                check_cancel()
+                with new_ydl() as ydl:
+                    ydl.extract_info(entry.get("url") or entry.get("webpage_url"),
+                                     ie_key=entry.get("ie_key"), extra_info=extra)
+            except DownloadCancelled:
+                cancelled = True
+            except Exception:  # noqa: BLE001 — o logger do yt-dlp já mostrou o erro
+                emit("log", f"✖ Item {extra['playlist_index']} falhou, seguindo para o próximo.")
+            finished.append(extra["playlist_index"])
+            if not cancelled and total["n"] > 1:
+                pct, prefix = overall()
+                emit("progress", pct, prefix.strip())
+            # Fora do except: assim o yt-dlp já soltou o arquivo que estava escrevendo.
+            if cancelled and local.file:
+                remove_partial_files(local.file, started)
 
         try:
-            # Consulta rápida (sem baixar) só para saber se o link é uma playlist.
-            probe_opts = {"extract_flat": "in_playlist", "noplaylist": opts["noplaylist"],
-                          "logger": QueueLogger(emit, quiet=True), "noprogress": True}
-            with yt_dlp.YoutubeDL(probe_opts) as ydl:
-                probe = ydl.extract_info(url, download=False)
+            # Busca as informações do link uma vez só (process=False: sem escolher formato nem
+            # baixar). Se for um item, o mesmo ydl reaproveita essas informações no download —
+            # tem que ser o mesmo, porque o YouTube recusa (403) links obtidos por outra sessão.
+            main_ydl = new_ydl()
+            probe = main_ydl.extract_info(url, download=False, process=False)
+            while probe and probe.get("_type") == "url":  # links curtos, redirecionamentos
+                probe = main_ydl.extract_info(probe["url"], download=False, process=False,
+                                              ie_key=probe.get("ie_key"))
             check_cancel()
-            if probe and probe.get("_type") == "playlist":
-                count = probe.get("playlist_count") or len(probe.get("entries") or [])
-                emit("log", f"Playlist: {probe.get('title', '?')} ({count} itens)")
+
+            entries = None
+            if probe and probe.get("_type") in ("playlist", "multi_video"):
+                entries = [e for e in probe.get("entries") or [] if e]
+                # Itens em paralelo só quando a lista traz links (o normal no YouTube);
+                # se o site já entregou os itens prontos, baixa na ordem pelo próprio yt-dlp.
+                if not all(e.get("_type") in ("url", "url_transparent") for e in entries):
+                    entries = None
+                    emit("log", "Baixando a lista em ordem, um item por vez.")
+
+            if entries is not None:
+                main_ydl.close()
+                title = probe.get("title") or "Playlist"
+                total["n"] = max(1, len(entries))
+                emit("log", f"Playlist: {title} ({len(entries)} itens) — baixando {workers} por vez")
+                emit("progress", 0, f"[0/{len(entries)} prontos] Começando…")
                 if mode == "video":
                     opts = dict(opts, outtmpl={**opts["outtmpl"], "default": VIDEO_PLAYLIST_TMPL})
-
-            opts = dict(opts, logger=QueueLogger(emit, on_skip=skipped_files.add), match_filter=match_filter,
-                        progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook])
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                if mode == "audio":
-                    ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
-                info = ydl.extract_info(url, download=True)
-
-            if info and info.get("_type") == "playlist":
-                total = info.get("playlist_count") or len([e for e in info.get("entries") or [] if e])
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    for index, entry in enumerate(entries, 1):
+                        pool.submit(download_entry, entry, {
+                            "playlist": title, "playlist_title": title, "playlist_index": index,
+                            "n_entries": len(entries), "playlist_count": len(entries)})
+                check_cancel()
                 summary = f"Concluído: {len(done)} baixado(s)"
                 if skipped:
                     summary += f", {len(skipped)} já existia(m)"
-                failed = max(0, total - len(done) - len(skipped))
+                failed = max(0, len(entries) - len(done) - len(skipped))
                 if failed:
                     summary += f", {failed} falharam (veja o registro)"
-                summary += f" — de {total} itens."
-            elif done:
-                summary = "Concluído!"
-            elif skipped:
-                summary = "Esse arquivo já estava na pasta."
+                summary += f" — de {len(entries)} itens em {format_duration(time.time() - started)}."
             else:
-                summary = "Nada foi baixado (veja o registro)."
+                local.file = None
+                cancelled = False
+                try:
+                    with main_ydl:
+                        main_ydl.process_ie_result(probe, download=True)
+                except DownloadCancelled:
+                    cancelled = True
+                if cancelled:
+                    if local.file:
+                        remove_partial_files(local.file, started)
+                    return
+                if done:
+                    summary = f"Concluído em {format_duration(time.time() - started)}!"
+                elif skipped:
+                    summary = "Esse arquivo já estava na pasta."
+                else:
+                    summary = "Nada foi baixado (veja o registro)."
             emit("done", summary)
         except DownloadCancelled:
-            cancelled = True
+            pass
         except Exception as exc:  # noqa: BLE001 — qualquer erro do yt-dlp vai para a tela
             emit("log", f"Erro: {exc}")
             emit("done", "Falhou. Veja o registro abaixo.")
-        # Fora do except: assim o yt-dlp já soltou o arquivo que estava escrevendo.
-        if cancelled and current["file"]:
-            remove_partial_files(current["file"], started)
 
     def _poll_events(self):
         try:

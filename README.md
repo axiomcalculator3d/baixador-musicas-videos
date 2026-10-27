@@ -52,6 +52,15 @@ Vídeos\
 - MP3/M4A já saem com capa e título/artista embutidos.
 - Músicas que já estão na pasta são puladas (não baixa de novo), e o resumo mostra quantas já existiam.
 
+## Velocidade
+
+- Playlists baixam **vários itens ao mesmo tempo** (padrão: 4; dá para mudar de 1 a 8 na tela).
+  Num teste com 8 músicas: 39 s um por vez → 12 s com 4 juntos.
+- Os arquivos são pedidos em pedaços de 10 MB, o que evita o limite de velocidade que o
+  YouTube aplica em downloads longos.
+- As informações de cada link são buscadas uma vez só.
+- Se a internet ou o computador forem mais fracos, diminua o número de downloads ao mesmo tempo.
+
 ## Outros detalhes
 
 - Se o vídeo não tiver a qualidade escolhida, ele pega a maior disponível abaixo dela.
