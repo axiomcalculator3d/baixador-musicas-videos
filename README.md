@@ -110,13 +110,7 @@ Se o programa te ajudou, considere uma contribuição de qualquer valor — no p
 | Pix | ⚡ Bitcoin Lightning |
 |:---:|:---:|
 | <img src="apoio-pix.png" alt="QR Code Pix" width="220"> | <img src="apoio-lightning.png" alt="QR Code Bitcoin Lightning" width="220"> |
-| Chave (celular): `+5538988235328` | `pliablemexican29@walletofsatoshi.com` |
-
-Pix copia e cola:
-
-```
-00020126540014br.gov.bcb.pix0114+55389882353280214Apoio Baixador5204000053039865802BR5917FRANCISLEY CAMPOS6006BRASIL62070503***63049B81
-```
+| Escaneie com o app do seu banco | `pliablemexican29@walletofsatoshi.com` |
 
 LNURL (Lightning):
 

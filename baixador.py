@@ -99,7 +99,8 @@ FONT_TITLE = ("Segoe UI Semibold", 18)
 FONT_MONO = ("Consolas", 9)
 FONT_MONO_BOLD = ("Consolas", 9, "bold")
 
-# Contribuições (janela "Apoiar"). A chave Pix é um celular, por isso o +55.
+# Contribuições (janela "Apoiar"). A chave Pix é um celular, por isso o +55. Ela não aparece
+# escrita na tela, só dentro do QR Code e do copia e cola.
 PIX_KEY = "+5538988235328"
 PIX_NAME = "Francisley Campos"
 PIX_CITY = "Brasil"
@@ -699,8 +700,8 @@ class App(tk.Tk):
         cards.pack(padx=18, pady=(14, 6))
         feedback = tk.StringVar()
         pix = pix_copia_e_cola(PIX_KEY, PIX_NAME, PIX_CITY)
-        self._support_card(cards, "Pix", pix, f"Chave (celular): {PIX_KEY}", THEME["green"], feedback,
-                           [("Copiar Pix copia e cola", pix), ("Copiar chave", PIX_KEY)])
+        self._support_card(cards, "Pix", pix, "Escaneie com o app do seu banco", THEME["green"],
+                           feedback, [("Copiar Pix copia e cola", pix)])
         if LIGHTNING_LNURL:
             self._support_card(cards, "⚡ Bitcoin Lightning", LIGHTNING_LNURL,
                                LIGHTNING_ADDRESS, THEME["yellow"], feedback,
