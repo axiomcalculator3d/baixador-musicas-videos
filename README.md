@@ -18,16 +18,44 @@ Funciona com YouTube, YouTube Music, SoundCloud, Vimeo, Instagram, TikTok, X/Twi
 > Dica: extraia numa pasta com caminho curto (ex.: `Área de Trabalho\Baixador`). O Windows
 > tem limite de tamanho de caminho e pastas muito profundas podem quebrar a instalação.
 
-## Opções
+## Formatos e qualidades
 
 | Formato | Qualidades |
 |---|---|
 | Vídeo (MP4) | Melhor disponível, 4K, 2K, 1080p, 720p, 480p, 360p |
 | Música / Áudio | MP3 320 / 192 / 128 kbps, M4A original (sem perda por conversão) |
 
-- Se o vídeo não tiver a qualidade escolhida, ele pega a maior disponível abaixo dela.
+## Como os arquivos ficam organizados
+
+Dentro da pasta escolhida (por padrão `Downloads\Baixador`; o programa lembra a última):
+
+```
+Músicas\
+  Artista A\
+    Música 1.mp3
+    Música 2.mp3
+  Artista B\
+    Música 3.mp3
+Outros formatos\          ← tudo que não é MP3 (ex.: M4A), também por artista
+  Artista A\
+    Música 1.m4a
+Vídeos\
+  Título do vídeo.mp4
+  Nome da playlist\       ← playlists de vídeo, numeradas na ordem
+    001 - Primeiro vídeo.mp4
+```
+
+- O artista vem dos dados da música (YouTube Music, SoundCloud…), do título no formato
+  `Artista - Música` ou, se não tiver, do nome do canal. Partes como "(Official Video)",
+  "[Clipe Oficial]" e "(Lyrics)" saem do nome do arquivo; "feat." sai do nome da pasta,
+  para o mesmo artista não virar duas pastas.
 - MP3/M4A já saem com capa e título/artista embutidos.
-- Arquivos vão por padrão para `Downloads\Baixador` (dá para trocar no programa; ele lembra a última escolha).
+- Músicas que já estão na pasta são puladas (não baixa de novo), e o resumo mostra quantas já existiam.
+
+## Outros detalhes
+
+- Se o vídeo não tiver a qualidade escolhida, ele pega a maior disponível abaixo dela.
+- **Cancelar** para na hora e apaga o arquivo incompleto; o que já terminou continua na pasta.
 - Em playlists, se um item falhar (privado, removido), os outros continuam.
 - Desmarque "baixar a playlist inteira" para baixar só o vídeo de um link do tipo `watch?v=...&list=...`.
 
