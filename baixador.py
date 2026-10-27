@@ -54,6 +54,37 @@ AUDIO_QUALITIES = {
     "M4A (melhor, sem conversão)": ("m4a", None),
 }
 
+# Tema escuro roxo/rosa com destaques coloridos.
+THEME = {
+    "bg": "#17142a",
+    "card": "#221e3b",
+    "field": "#2e2950",
+    "border": "#433c72",
+    "fg": "#f3f0ff",
+    "muted": "#a59fd0",
+    "primary": "#7c5cff",
+    "primary_hover": "#9a80ff",
+    "pink": "#ff4f8b",
+    "pink_hover": "#ff75a5",
+    "cyan": "#5ee0f5",
+    "green": "#3ee0a1",
+    "yellow": "#ffcb5c",
+    "red": "#ff6b6b",
+    "log_bg": "#100e1f",
+}
+GRADIENT = ("#6a4cff", "#b34cff", "#ff4f8b")  # faixa do topo, da esquerda para a direita
+LOG_COLORS = {"ok": THEME["green"], "warn": THEME["yellow"], "error": THEME["red"],
+              "info": THEME["cyan"], "cancel": THEME["pink"]}
+FONT = ("Segoe UI", 10)
+FONT_SMALL = ("Segoe UI", 9)
+FONT_BOLD = ("Segoe UI Semibold", 10)
+FONT_BIG = ("Segoe UI", 11)
+FONT_BIG_BOLD = ("Segoe UI Semibold", 12)
+FONT_LABEL = ("Segoe UI Semibold", 8)
+FONT_TITLE = ("Segoe UI Semibold", 18)
+FONT_MONO = ("Consolas", 9)
+FONT_MONO_BOLD = ("Consolas", 9, "bold")
+
 VIDEO_TMPL = "Vídeos/%(title).150B.%(ext)s"
 VIDEO_PLAYLIST_TMPL = "Vídeos/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s"
 MP3_TMPL = "Músicas/%(pasta_artista).80B/%(musica).150B.%(ext)s"
@@ -254,8 +285,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Baixador de Músicas e Vídeos")
-        self.geometry("720x580")
-        self.minsize(600, 500)
+        self.geometry("780x760")
+        self.minsize(660, 640)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -276,7 +307,9 @@ class App(tk.Tk):
         self.status_var = tk.StringVar(value="Cole um link e clique em Baixar.")
         self.hint_var = tk.StringVar()
 
+        self._setup_style()
         self._build()
+        self._dark_title_bar()
         self._on_mode_change(initial=True)
         self.after(100, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -285,67 +318,198 @@ class App(tk.Tk):
             self._log("FFmpeg não encontrado. Rode o iniciar.bat de novo para instalar, "
                       "senão MP3 e vídeos em alta qualidade não funcionam.")
 
+    def _setup_style(self):
+        self.configure(bg=THEME["bg"])
+        style = ttk.Style(self)
+        style.theme_use("clam")  # o único tema do Windows que aceita trocar todas as cores
+        field, fg, border = THEME["field"], THEME["fg"], THEME["border"]
+        style.configure("TCombobox", fieldbackground=field, background=field, foreground=fg,
+                        arrowcolor=fg, bordercolor=border, lightcolor=field, darkcolor=field,
+                        padding=6)
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", field)], foreground=[("readonly", fg)],
+                  selectbackground=[("readonly", field)], selectforeground=[("readonly", fg)],
+                  background=[("active", border), ("readonly", field)])
+        self.option_add("*TCombobox*Listbox.background", field)
+        self.option_add("*TCombobox*Listbox.foreground", fg)
+        self.option_add("*TCombobox*Listbox.selectBackground", THEME["primary"])
+        self.option_add("*TCombobox*Listbox.selectForeground", "white")
+        self.option_add("*TCombobox*Listbox.font", FONT)
+        style.configure("TSpinbox", fieldbackground=field, background=field, foreground=fg,
+                        arrowcolor=fg, bordercolor=border, lightcolor=field, darkcolor=field,
+                        padding=4)
+        style.map("TSpinbox", fieldbackground=[("readonly", field)], foreground=[("readonly", fg)],
+                  selectbackground=[("readonly", field)], selectforeground=[("readonly", fg)],
+                  background=[("active", border), ("readonly", field)])
+        for name, color in (("Accent", THEME["primary"]), ("Done", THEME["green"]),
+                            ("Error", THEME["red"]), ("Cancel", THEME["pink"])):
+            style.configure(f"{name}.Horizontal.TProgressbar", troughcolor=field, background=color,
+                            lightcolor=color, darkcolor=color, bordercolor=THEME["bg"], thickness=14)
+        for name in ("TScrollbar", "Vertical.TScrollbar"):
+            style.configure(name, background=border, troughcolor=THEME["log_bg"],
+                            arrowcolor=THEME["muted"], bordercolor=THEME["log_bg"],
+                            lightcolor=border, darkcolor=border, gripcount=0, relief="flat")
+            style.map(name, background=[("active", THEME["primary"]), ("!active", border)])
+
+    def _dark_title_bar(self):
+        """Windows 10/11: barra de título escura, combinando com a janela."""
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            dwm = ctypes.windll.dwmapi
+            on = ctypes.c_int(1)
+            dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(on), ctypes.sizeof(on))
+            r, g, b = (int(THEME["bg"][i:i + 2], 16) for i in (1, 3, 5))
+            color = ctypes.c_int(r | g << 8 | b << 16)  # Windows 11: cor da barra
+            dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(color), ctypes.sizeof(color))
+        except Exception:  # noqa: BLE001 — é só enfeite; versões antigas do Windows ignoram
+            pass
+
+    def _button(self, parent, text, command, color, hover, fg="white", **kw):
+        btn = tk.Button(parent, text=text, command=command, bg=color, fg=fg, activebackground=hover,
+                        activeforeground=fg, disabledforeground=THEME["muted"], relief="flat", bd=0,
+                        highlightthickness=0, cursor="hand2", font=FONT_BOLD, padx=16, pady=7, **kw)
+        btn.colors = (color, hover)
+        btn.bind("<Enter>", lambda _e: str(btn["state"]) != "disabled" and btn.configure(bg=hover))
+        btn.bind("<Leave>", lambda _e: str(btn["state"]) != "disabled" and btn.configure(bg=color))
+        return btn
+
+    @staticmethod
+    def _set_enabled(btn, enabled):
+        btn.configure(state="normal" if enabled else "disabled",
+                      bg=btn.colors[0] if enabled else THEME["border"],
+                      cursor="hand2" if enabled else "arrow")
+
+    def _entry(self, parent, var):
+        return tk.Entry(parent, textvariable=var, bg=THEME["field"], fg=THEME["fg"],
+                        insertbackground=THEME["fg"], relief="flat", font=FONT_BIG,
+                        highlightthickness=2, highlightbackground=THEME["field"],
+                        highlightcolor=THEME["primary"])
+
+    def _section(self, parent, text):
+        return tk.Label(parent, text=text, bg=THEME["card"], fg=THEME["muted"], font=FONT_LABEL)
+
+    def _draw_header(self, event=None):
+        canvas = self.header
+        width = canvas.winfo_width()
+        height = int(canvas["height"])
+        canvas.delete("grad")
+        stops = [tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in GRADIENT]
+        step = 4
+        for x in range(0, width, step):
+            t = x / max(1, width - 1) * (len(stops) - 1)
+            i = min(int(t), len(stops) - 2)
+            frac = t - i
+            rgb = [round(a + (b - a) * frac) for a, b in zip(stops[i], stops[i + 1])]
+            color = "#%02x%02x%02x" % tuple(rgb)
+            canvas.create_rectangle(x, 0, x + step, height, fill=color, outline=color, tags="grad")
+        canvas.tag_lower("grad")
+
     def _build(self):
-        pad = {"padx": 10, "pady": 5}
-        frm = ttk.Frame(self, padding=10)
-        frm.pack(fill="both", expand=True)
-        frm.columnconfigure(1, weight=1)
+        self.header = tk.Canvas(self, height=84, highlightthickness=0, bd=0, bg=THEME["bg"])
+        self.header.pack(fill="x")
+        self.header.create_text(26, 30, anchor="w", text="♫  Baixador de Músicas e Vídeos",
+                                fill="white", font=FONT_TITLE)
+        self.header.create_text(28, 60, anchor="w", fill="#f5eaff", font=FONT,
+                                text="Cole o link, escolha o formato e a qualidade — playlists inteiras também.")
+        self.header.bind("<Configure>", self._draw_header)
 
-        ttk.Label(frm, text="Link:").grid(row=0, column=0, sticky="w", **pad)
-        url_entry = ttk.Entry(frm, textvariable=self.url_var)
-        url_entry.grid(row=0, column=1, sticky="ew", **pad)
+        body = tk.Frame(self, bg=THEME["bg"], padx=18, pady=14)
+        body.pack(fill="both", expand=True)
+
+        card = tk.Frame(body, bg=THEME["card"], padx=18, pady=14)
+        card.pack(fill="x")
+        card.columnconfigure(0, weight=1)
+
+        self._section(card, "LINK").grid(row=0, column=0, sticky="w")
+        link_row = tk.Frame(card, bg=THEME["card"])
+        link_row.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+        url_entry = self._entry(link_row, self.url_var)
+        url_entry.pack(side="left", fill="x", expand=True, ipady=6)
         url_entry.bind("<Return>", lambda _e: self._start())
-        ttk.Button(frm, text="Colar", command=self._paste).grid(row=0, column=2, **pad)
         url_entry.focus_set()
+        self._button(link_row, "Colar", self._paste, THEME["field"], THEME["border"],
+                     fg=THEME["cyan"]).pack(side="left", padx=(8, 0))
 
-        ttk.Label(frm, text="Formato:").grid(row=1, column=0, sticky="w", **pad)
-        modes = ttk.Frame(frm)
-        modes.grid(row=1, column=1, columnspan=2, sticky="w", **pad)
-        ttk.Radiobutton(modes, text="Vídeo (MP4)", value="video", variable=self.mode_var,
-                        command=self._on_mode_change).pack(side="left", padx=(0, 20))
-        ttk.Radiobutton(modes, text="Música / Áudio", value="audio", variable=self.mode_var,
-                        command=self._on_mode_change).pack(side="left")
-
-        ttk.Label(frm, text="Qualidade:").grid(row=2, column=0, sticky="w", **pad)
-        self.quality_box = ttk.Combobox(frm, textvariable=self.quality_var, state="readonly", width=32)
-        self.quality_box.grid(row=2, column=1, sticky="w", **pad)
+        options_row = tk.Frame(card, bg=THEME["card"])
+        options_row.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        format_col = tk.Frame(options_row, bg=THEME["card"])
+        format_col.pack(side="left", padx=(0, 24))
+        self._section(format_col, "FORMATO").pack(anchor="w")
+        toggles = tk.Frame(format_col, bg=THEME["card"])
+        toggles.pack(anchor="w", pady=(4, 0))
+        self.mode_buttons = {}
+        for value, text, color in (("video", "▶  Vídeo (MP4)", THEME["primary"]),
+                                   ("audio", "♪  Música / Áudio", THEME["pink"])):
+            btn = tk.Radiobutton(toggles, text=text, value=value, variable=self.mode_var,
+                                 command=self._on_mode_change, indicatoron=0, selectcolor=color,
+                                 bg=THEME["field"], fg=THEME["muted"], activebackground=THEME["border"],
+                                 activeforeground="white", relief="flat", offrelief="flat", bd=0,
+                                 highlightthickness=0, font=FONT_BOLD, padx=16, pady=7, cursor="hand2")
+            btn.pack(side="left", padx=(0, 6))
+            self.mode_buttons[value] = btn
+        quality_col = tk.Frame(options_row, bg=THEME["card"])
+        quality_col.pack(side="left", fill="x", expand=True)
+        self._section(quality_col, "QUALIDADE").pack(anchor="w")
+        self.quality_box = ttk.Combobox(quality_col, textvariable=self.quality_var, state="readonly",
+                                        font=FONT, width=30)
+        self.quality_box.pack(anchor="w", fill="x", pady=(4, 0))
         self.quality_box.bind("<<ComboboxSelected>>", lambda _e: self._update_hint())
 
-        ttk.Label(frm, text="Salvar em:").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Entry(frm, textvariable=self.folder_var).grid(row=3, column=1, sticky="ew", **pad)
-        ttk.Button(frm, text="Escolher…", command=self._choose_folder).grid(row=3, column=2, **pad)
-        ttk.Label(frm, textvariable=self.hint_var, foreground="#555").grid(
-            row=4, column=1, columnspan=2, sticky="w", padx=10)
+        self._section(card, "SALVAR EM").grid(row=3, column=0, sticky="w")
+        folder_row = tk.Frame(card, bg=THEME["card"])
+        folder_row.grid(row=4, column=0, sticky="ew", pady=(4, 4))
+        self._entry(folder_row, self.folder_var).pack(side="left", fill="x", expand=True, ipady=6)
+        self._button(folder_row, "Escolher…", self._choose_folder, THEME["field"], THEME["border"],
+                     fg=THEME["cyan"]).pack(side="left", padx=(8, 0))
+        tk.Label(card, textvariable=self.hint_var, bg=THEME["card"], fg=THEME["cyan"],
+                 font=FONT_SMALL).grid(row=5, column=0, sticky="w", pady=(0, 10))
 
-        playlist_row = ttk.Frame(frm)
-        playlist_row.grid(row=5, column=1, columnspan=2, sticky="w", **pad)
-        ttk.Checkbutton(playlist_row, text="Se o link for de uma playlist, baixar a playlist inteira",
-                        variable=self.playlist_var).pack(side="left")
-        ttk.Label(playlist_row, text="   Baixar").pack(side="left")
+        playlist_row = tk.Frame(card, bg=THEME["card"])
+        playlist_row.grid(row=6, column=0, sticky="w")
+        tk.Checkbutton(playlist_row, text="Baixar a playlist inteira", variable=self.playlist_var,
+                       bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
+                       activebackground=THEME["card"], activeforeground=THEME["fg"],
+                       highlightthickness=0, bd=0, font=FONT, cursor="hand2").pack(side="left")
+        tk.Label(playlist_row, text="     Itens ao mesmo tempo:", bg=THEME["card"], fg=THEME["muted"],
+                 font=FONT).pack(side="left")
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
-                    state="readonly").pack(side="left", padx=4)
-        ttk.Label(playlist_row, text="ao mesmo tempo").pack(side="left")
+                    state="readonly", font=FONT).pack(side="left", padx=6)
 
-        buttons = ttk.Frame(frm)
-        buttons.grid(row=6, column=0, columnspan=3, sticky="ew", **pad)
-        self.download_btn = ttk.Button(buttons, text="Baixar", command=self._start)
+        actions = tk.Frame(body, bg=THEME["bg"])
+        actions.pack(fill="x", pady=(14, 10))
+        self.download_btn = self._button(actions, "⬇  Baixar", self._start, THEME["primary"],
+                                         THEME["primary_hover"])
+        self.download_btn.configure(font=FONT_BIG_BOLD, padx=28, pady=9)
         self.download_btn.pack(side="left")
-        self.cancel_btn = ttk.Button(buttons, text="Cancelar", command=self._cancel, state="disabled")
-        self.cancel_btn.pack(side="left", padx=10)
-        ttk.Button(buttons, text="Abrir pasta", command=self._open_folder).pack(side="right")
+        self.cancel_btn = self._button(actions, "✖  Cancelar", self._cancel, THEME["pink"],
+                                       THEME["pink_hover"])
+        self.cancel_btn.pack(side="left", padx=10, ipady=2)
+        self._set_enabled(self.cancel_btn, False)
+        self._button(actions, "Abrir pasta", self._open_folder, THEME["field"], THEME["border"],
+                     fg=THEME["yellow"]).pack(side="right", ipady=2)
 
-        self.progress = ttk.Progressbar(frm, maximum=100)
-        self.progress.grid(row=7, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Label(frm, textvariable=self.status_var).grid(row=8, column=0, columnspan=3, sticky="w", **pad)
+        self.progress = ttk.Progressbar(body, maximum=100, style="Accent.Horizontal.TProgressbar")
+        self.progress.pack(fill="x")
+        tk.Label(body, textvariable=self.status_var, bg=THEME["bg"], fg=THEME["fg"], font=FONT_BOLD,
+                 anchor="w").pack(fill="x", pady=(6, 8))
 
-        log_frame = ttk.Frame(frm)
-        log_frame.grid(row=9, column=0, columnspan=3, sticky="nsew", **pad)
-        frm.rowconfigure(9, weight=1)
-        self.log_text = tk.Text(log_frame, height=10, wrap="word", state="disabled")
-        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        log_card = tk.Frame(body, bg=THEME["log_bg"], padx=10, pady=8)
+        log_card.pack(fill="both", expand=True)
+        self.log_text = tk.Text(log_card, height=10, wrap="word", state="disabled", bg=THEME["log_bg"],
+                                fg=THEME["muted"], relief="flat", bd=0, highlightthickness=0,
+                                font=FONT_MONO, insertbackground=THEME["fg"],
+                                selectbackground=THEME["primary"])
+        scroll = ttk.Scrollbar(log_card, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        for tag, color in LOG_COLORS.items():
+            self.log_text.tag_configure(tag, foreground=color)
+        self.log_text.tag_configure("head", foreground=THEME["primary_hover"], font=FONT_MONO_BOLD)
 
     def _on_mode_change(self, initial=False):
         if self.mode_var.get() == "video":
@@ -354,6 +518,8 @@ class App(tk.Tk):
         else:
             options = list(AUDIO_QUALITIES)
             saved = self.config_data.get("audio_quality")
+        for value, btn in self.mode_buttons.items():
+            btn.configure(fg="white" if value == self.mode_var.get() else THEME["muted"])
         self.quality_box["values"] = options
         self.quality_var.set(saved if initial is True and saved in options else options[0])
         self._update_hint()
@@ -387,15 +553,29 @@ class App(tk.Tk):
             subprocess.Popen(["xdg-open" if sys.platform != "darwin" else "open", str(folder)])
 
     def _log(self, msg):
+        if msg.startswith(("\n===", "===")):
+            tag = "head"
+        elif msg.startswith(("✔", "Concluído")):
+            tag = "ok"
+        elif msg.startswith("↷") or msg.startswith("Aviso") or msg.startswith("Esse arquivo"):
+            tag = "warn"
+        elif msg.startswith(("✖", "Erro", "ERROR", "Falhou", "FFmpeg não")):
+            tag = "error"
+        elif msg.startswith(("Playlist", "Baixando a lista")):
+            tag = "info"
+        elif msg.startswith("Cancelado"):
+            tag = "cancel"
+        else:
+            tag = ""
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", msg + "\n")
+        self.log_text.insert("end", msg + "\n", tag)
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
     def _set_running(self, running):
         self.running = running
-        self.download_btn.configure(state="disabled" if running else "normal")
-        self.cancel_btn.configure(state="normal" if running else "disabled")
+        self._set_enabled(self.download_btn, not running)
+        self._set_enabled(self.cancel_btn, running)
 
     def _start(self):
         if self.running:
@@ -417,6 +597,7 @@ class App(tk.Tk):
         self.run_id += 1
         self.cancel_event = threading.Event()
         self._set_running(True)
+        self.progress.configure(style="Accent.Horizontal.TProgressbar")
         self.progress["value"] = 0
         self.status_var.set("Buscando informações do link…")
         self._log(f"\n=== {url} ({quality}) ===")
@@ -431,7 +612,8 @@ class App(tk.Tk):
         self.cancel_event.set()
         self.run_id += 1
         self._set_running(False)
-        self.progress["value"] = 0
+        self.progress.configure(style="Cancel.Horizontal.TProgressbar")
+        self.progress["value"] = 100
         self.status_var.set("Cancelado. As músicas/vídeos que já terminaram continuam na pasta.")
         self._log("Cancelado pelo usuário.")
 
@@ -595,6 +777,10 @@ class App(tk.Tk):
                     self.progress["value"] = data[0]
                     self.status_var.set(data[1])
                 elif kind == "done":
+                    failed = data[0].startswith(("Falhou", "Nada"))
+                    self.progress.configure(
+                        style=f"{'Error' if failed else 'Done'}.Horizontal.TProgressbar")
+                    self.progress["value"] = 100
                     self.status_var.set(data[0])
                     self._log(data[0])
                     self._set_running(False)
