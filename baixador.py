@@ -183,10 +183,10 @@ def read_spotify(url, ydl):
 # Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros.
 _ERROR_HINTS = [
     (r"Private video|video is private", "Vídeo privado"),
-    (r"members?[- ]only|Join this channel", "Só para membros do canal (use a opção Login)"),
+    (r"members?[- ]only|Join this channel", "Só para membros do canal"),
     (r"confirm your age|age[- ]restricted|inappropriate for some users",
-     "Restrição de idade: precisa de login (use a opção Login)"),
-    (r"not a bot", "O YouTube pediu verificação anti-robô: use a opção Login ou tente mais tarde"),
+     "Restrição de idade: o YouTube só libera para contas logadas"),
+    (r"not a bot", "O YouTube pediu verificação anti-robô: tente de novo mais tarde"),
     (r"not available in your country|geo[- ]?restrict", "Bloqueado no seu país"),
     (r"Video unavailable|This video is unavailable|has been removed|terminated",
      "Vídeo indisponível ou removido"),
@@ -196,7 +196,6 @@ _ERROR_HINTS = [
     (r"HTTP Error 429|Too Many Requests", "O site bloqueou por excesso de pedidos: tente mais tarde"),
     (r"Unsupported URL", "Site ou link não suportado"),
     (r"DRM", "Protegido contra cópia (DRM): não dá para baixar"),
-    (r"cookie|DPAPI", "Não consegui usar o login escolhido (veja o botão ? ao lado de Login)"),
     (r"timed out|Connection|getaddrinfo|unreachable", "Problema de conexão com a internet"),
     (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "Falha ao converter o arquivo (FFmpeg)"),
 ]
@@ -211,21 +210,6 @@ def explain_error(msg):
     if not msg:
         return "Motivo desconhecido"
     return msg if len(msg) <= 150 else msg[:150] + "…"
-
-
-LOGIN_NONE, LOGIN_FIREFOX, LOGIN_FILE = "Sem login", "Firefox (automático)", "Arquivo cookies.txt…"
-LOGIN_HELP = (
-    "O login serve para baixar o que só aparece com a sua conta: vídeos com restrição de "
-    "idade, conteúdo de membros, posts privados que você pode ver, etc.\n\n"
-    "• Firefox: o programa lê o login do Firefox sozinho.\n\n"
-    "• Chrome e Edge: no Windows eles protegem o login com uma criptografia que nenhum "
-    "programa externo consegue abrir. Use um arquivo cookies.txt:\n"
-    "   1. Instale a extensão \"Get cookies.txt LOCALLY\" no Chrome ou Edge.\n"
-    "   2. Abra o site (ex.: youtube.com) já logado na sua conta.\n"
-    "   3. Clique na extensão e em \"Export\".\n"
-    "   4. Aqui, escolha \"Arquivo cookies.txt…\" e selecione o arquivo salvo.\n\n"
-    "Atenção: o cookies.txt dá acesso à sua conta. Guarde em lugar seguro e não envie a ninguém."
-)
 
 
 def find_ffmpeg():
@@ -253,7 +237,7 @@ def save_config(data):
         pass
 
 
-def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, login=None):
+def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
     opts = {
         # pl_thumbnail vazio: não salva a capa da playlist como arquivo solto.
         "outtmpl": {"default": VIDEO_TMPL, "pl_thumbnail": ""},
@@ -271,10 +255,6 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, login=None)
     }
     if ffmpeg_dir:
         opts["ffmpeg_location"] = ffmpeg_dir
-    if login == "firefox":
-        opts["cookiesfrombrowser"] = ("firefox",)
-    elif login:
-        opts["cookiefile"] = login  # caminho de um cookies.txt
 
     if mode == "video":
         height = VIDEO_QUALITIES[quality]
@@ -376,8 +356,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Baixador de Músicas e Vídeos")
-        self.geometry("780x800")
-        self.minsize(660, 690)
+        self.geometry("780x760")
+        self.minsize(660, 640)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -395,12 +375,6 @@ class App(tk.Tk):
         self.folder_var = tk.StringVar(value=self.config_data.get("folder", str(DEFAULT_FOLDER)))
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
-        self.cookie_file = self.config_data.get("cookie_file", "")
-        login = self.config_data.get("login", LOGIN_NONE)
-        if login == LOGIN_FILE and not Path(self.cookie_file).is_file():
-            login = LOGIN_NONE
-        self.login_var = tk.StringVar(value=login)
-        self.login_info_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Cole um link e clique em Baixar.")
         self.hint_var = tk.StringVar()
 
@@ -576,20 +550,6 @@ class App(tk.Tk):
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
 
-        login_row = tk.Frame(card, bg=THEME["card"])
-        login_row.grid(row=7, column=0, sticky="ew", pady=(10, 0))
-        tk.Label(login_row, text="Login:", bg=THEME["card"], fg=THEME["muted"],
-                 font=FONT).pack(side="left")
-        login_box = ttk.Combobox(login_row, textvariable=self.login_var, state="readonly", width=22,
-                                 values=[LOGIN_NONE, LOGIN_FIREFOX, LOGIN_FILE], font=FONT)
-        login_box.pack(side="left", padx=6)
-        login_box.bind("<<ComboboxSelected>>", self._on_login_change)
-        tk.Label(login_row, textvariable=self.login_info_var, bg=THEME["card"], fg=THEME["cyan"],
-                 font=FONT_SMALL).pack(side="left", padx=4)
-        self._button(login_row, "?", lambda: messagebox.showinfo("Login", LOGIN_HELP),
-                     THEME["field"], THEME["border"], fg=THEME["yellow"]).pack(side="right")
-        self._update_login_info()
-
         actions = tk.Frame(body, bg=THEME["bg"])
         actions.pack(fill="x", pady=(14, 10))
         self.download_btn = self._button(actions, "⬇  Baixar", self._start, THEME["primary"],
@@ -643,25 +603,6 @@ class App(tk.Tk):
         else:
             hint = "M4A vai para Outros formatos\\<Artista>\\ (separado dos MP3)."
         self.hint_var.set(hint)
-
-    def _on_login_change(self, _event=None):
-        if self.login_var.get() == LOGIN_FILE:
-            path = filedialog.askopenfilename(
-                title="Escolha o arquivo cookies.txt",
-                filetypes=[("cookies.txt", "*.txt"), ("Todos os arquivos", "*.*")])
-            if path:
-                self.cookie_file = path
-            elif not Path(self.cookie_file).is_file():
-                self.login_var.set(LOGIN_NONE)
-        self._update_login_info()
-
-    def _update_login_info(self):
-        info = ""
-        if self.login_var.get() == LOGIN_FILE:
-            info = Path(self.cookie_file).name
-        elif self.login_var.get() == LOGIN_FIREFOX:
-            info = "(o Firefox precisa estar instalado e logado)"
-        self.login_info_var.set(info)
 
     def _paste(self):
         try:
@@ -719,21 +660,11 @@ class App(tk.Tk):
 
         mode, quality = self.mode_var.get(), self.quality_var.get()
         workers = max(1, min(8, self.workers_var.get()))
-        login_choice = self.login_var.get()
-        login = None
-        if login_choice == LOGIN_FIREFOX:
-            login = "firefox"
-        elif login_choice == LOGIN_FILE:
-            if not Path(self.cookie_file).is_file():
-                messagebox.showwarning("Login", "O arquivo cookies.txt não foi encontrado. Escolha de novo.")
-                return
-            login = self.cookie_file
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
-                                 "workers": workers, "login": login_choice,
-                                 "cookie_file": self.cookie_file})
+                                 "workers": workers})
         save_config(self.config_data)
 
-        opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir, login)
+        opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
         self.run_id += 1
         self.cancel_event = threading.Event()
         self._set_running(True)

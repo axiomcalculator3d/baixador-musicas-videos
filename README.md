@@ -19,16 +19,6 @@ já organizando em `Músicas\<Artista>\` com os nomes certos do Spotify.
 - O Spotify mostra no máximo **100 músicas por link**; para playlists maiores, divida em partes.
 - A busca pega o primeiro resultado do YouTube; em músicas pouco conhecidas pode vir uma versão diferente.
 
-## Login (conteúdo com restrição)
-
-Para vídeos com restrição de idade, conteúdo de membros ou posts que só aparecem logado,
-use a opção **Login** (o botão **?** ao lado explica o passo a passo):
-
-- **Firefox**: lê o login do Firefox automaticamente.
-- **Chrome / Edge**: no Windows eles criptografam o login de um jeito que nenhum programa externo
-  consegue ler. Exporte um `cookies.txt` com a extensão *Get cookies.txt LOCALLY* e escolha
-  **Arquivo cookies.txt…** no programa. Guarde esse arquivo com cuidado: ele dá acesso à sua conta.
-
 ## Lista de erros
 
 No fim de cada download, o registro mostra **quais itens deram erro e por quê**, em português
