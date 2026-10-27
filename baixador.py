@@ -26,6 +26,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import yt_dlp
+from yt_dlp.networking import Request
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import DownloadCancelled
 
@@ -134,15 +135,97 @@ class ArtistOrganizer(PostProcessor):
     """Roda antes do download: define a pasta do artista, o nome do arquivo e as tags."""
 
     def run(self, info):
-        artist, song = guess_artist_song(info)
+        if info.get("spotify_artist"):  # veio de um link do Spotify: confia nos dados de lá
+            artists = [a.strip() for a in info["spotify_artist"].split(",") if a.strip()]
+            artist, song = clean_artist(artists[0] if artists else ""), info["spotify_title"]
+            info["artists"], info["artist"], info["track"] = artists, ", ".join(artists), song
+        else:
+            artist, song = guess_artist_song(info)
         info["pasta_artista"] = artist
-        info["musica"] = song
+        info["musica"] = clean_song(song)
         if not info.get("artists"):
             info["artists"] = [artist]
             info["artist"] = artist
         if not info.get("track"):
             info["track"] = song
         return [], info
+
+
+SPOTIFY_LINK = re.compile(
+    r"open\.spotify\.com/(?:intl-[\w-]+/)?(?:embed/)?(track|album|playlist)/([A-Za-z0-9]+)")
+SPOTIFY_EMBED_LIMIT = 100  # a página pública do Spotify lista no máximo isso por link
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+
+
+def read_spotify(url, ydl):
+    """Lê artista e nome de cada música de um link do Spotify.
+
+    O Spotify não deixa baixar o áudio (é protegido), mas a página pública de incorporação
+    traz a lista de músicas; cada uma depois é procurada e baixada do YouTube.
+    """
+    kind, spotify_id = SPOTIFY_LINK.search(url).groups()
+    request = Request(f"https://open.spotify.com/embed/{kind}/{spotify_id}",
+                      headers={"User-Agent": BROWSER_UA})
+    html = ydl.urlopen(request).read().decode("utf-8", "replace")
+    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
+    if not match:
+        raise ValueError("Não consegui ler esse link do Spotify (ele é público?)")
+    entity = json.loads(match.group(1))["props"]["pageProps"]["state"]["data"]["entity"]
+    name = entity.get("name") or entity.get("title") or "Spotify"
+    if kind == "track":
+        tracks = [(", ".join(a["name"] for a in entity.get("artists") or []), name)]
+    else:
+        tracks = [(t.get("subtitle") or "", t.get("title") or "") for t in entity.get("trackList") or []]
+    return kind, name, [(a.replace("\xa0", " ").strip(), t.strip()) for a, t in tracks if t]
+
+
+# Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros.
+_ERROR_HINTS = [
+    (r"Private video|video is private", "Vídeo privado"),
+    (r"members?[- ]only|Join this channel", "Só para membros do canal (use a opção Login)"),
+    (r"confirm your age|age[- ]restricted|inappropriate for some users",
+     "Restrição de idade: precisa de login (use a opção Login)"),
+    (r"not a bot", "O YouTube pediu verificação anti-robô: use a opção Login ou tente mais tarde"),
+    (r"not available in your country|geo[- ]?restrict", "Bloqueado no seu país"),
+    (r"Video unavailable|This video is unavailable|has been removed|terminated",
+     "Vídeo indisponível ou removido"),
+    (r"Requested format is not available", "A qualidade escolhida não existe para este item"),
+    (r"HTTP Error 403", "O site recusou o acesso (erro 403)"),
+    (r"HTTP Error 404", "Não encontrado no site (erro 404)"),
+    (r"HTTP Error 429|Too Many Requests", "O site bloqueou por excesso de pedidos: tente mais tarde"),
+    (r"Unsupported URL", "Site ou link não suportado"),
+    (r"DRM", "Protegido contra cópia (DRM): não dá para baixar"),
+    (r"cookie|DPAPI", "Não consegui usar o login escolhido (veja o botão ? ao lado de Login)"),
+    (r"timed out|Connection|getaddrinfo|unreachable", "Problema de conexão com a internet"),
+    (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "Falha ao converter o arquivo (FFmpeg)"),
+]
+
+
+def explain_error(msg):
+    msg = (msg or "").strip()
+    for pattern, text in _ERROR_HINTS:
+        if re.search(pattern, msg, re.IGNORECASE):
+            return text
+    msg = re.sub(r"^(ERROR:\s*)?(\[[^\]]+\]\s*)?([\w-]{6,}:\s*)?", "", msg)  # "ERROR: [site] id: "
+    if not msg:
+        return "Motivo desconhecido"
+    return msg if len(msg) <= 150 else msg[:150] + "…"
+
+
+LOGIN_NONE, LOGIN_FIREFOX, LOGIN_FILE = "Sem login", "Firefox (automático)", "Arquivo cookies.txt…"
+LOGIN_HELP = (
+    "O login serve para baixar o que só aparece com a sua conta: vídeos com restrição de "
+    "idade, conteúdo de membros, posts privados que você pode ver, etc.\n\n"
+    "• Firefox: o programa lê o login do Firefox sozinho.\n\n"
+    "• Chrome e Edge: no Windows eles protegem o login com uma criptografia que nenhum "
+    "programa externo consegue abrir. Use um arquivo cookies.txt:\n"
+    "   1. Instale a extensão \"Get cookies.txt LOCALLY\" no Chrome ou Edge.\n"
+    "   2. Abra o site (ex.: youtube.com) já logado na sua conta.\n"
+    "   3. Clique na extensão e em \"Export\".\n"
+    "   4. Aqui, escolha \"Arquivo cookies.txt…\" e selecione o arquivo salvo.\n\n"
+    "Atenção: o cookies.txt dá acesso à sua conta. Guarde em lugar seguro e não envie a ninguém."
+)
 
 
 def find_ffmpeg():
@@ -170,7 +253,7 @@ def save_config(data):
         pass
 
 
-def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
+def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, login=None):
     opts = {
         # pl_thumbnail vazio: não salva a capa da playlist como arquivo solto.
         "outtmpl": {"default": VIDEO_TMPL, "pl_thumbnail": ""},
@@ -188,6 +271,10 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
     }
     if ffmpeg_dir:
         opts["ffmpeg_location"] = ffmpeg_dir
+    if login == "firefox":
+        opts["cookiesfrombrowser"] = ("firefox",)
+    elif login:
+        opts["cookiefile"] = login  # caminho de um cookies.txt
 
     if mode == "video":
         height = VIDEO_QUALITIES[quality]
@@ -254,10 +341,11 @@ def glob_escape(text):
 
 
 class QueueLogger:
-    def __init__(self, emit, quiet=False, on_skip=None):
+    def __init__(self, emit, quiet=False, on_skip=None, on_error=None):
         self.emit = emit
         self.quiet = quiet
         self.on_skip = on_skip
+        self.on_error = on_error
 
     def debug(self, msg):
         # O yt-dlp manda mensagens normais por debug(); as de debug de verdade começam com [debug].
@@ -278,15 +366,18 @@ class QueueLogger:
         self.emit("log", f"Aviso: {msg}")
 
     def error(self, msg):
-        self.emit("log", msg)
+        if self.on_error:
+            self.on_error(msg)
+        else:
+            self.emit("log", msg)
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Baixador de Músicas e Vídeos")
-        self.geometry("780x760")
-        self.minsize(660, 640)
+        self.geometry("780x800")
+        self.minsize(660, 690)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -304,6 +395,12 @@ class App(tk.Tk):
         self.folder_var = tk.StringVar(value=self.config_data.get("folder", str(DEFAULT_FOLDER)))
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
+        self.cookie_file = self.config_data.get("cookie_file", "")
+        login = self.config_data.get("login", LOGIN_NONE)
+        if login == LOGIN_FILE and not Path(self.cookie_file).is_file():
+            login = LOGIN_NONE
+        self.login_var = tk.StringVar(value=login)
+        self.login_info_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Cole um link e clique em Baixar.")
         self.hint_var = tk.StringVar()
 
@@ -414,7 +511,7 @@ class App(tk.Tk):
         self.header.create_text(26, 30, anchor="w", text="♫  Baixador de Músicas e Vídeos",
                                 fill="white", font=FONT_TITLE)
         self.header.create_text(28, 60, anchor="w", fill="#f5eaff", font=FONT,
-                                text="Cole o link, escolha o formato e a qualidade — playlists inteiras também.")
+                                text="YouTube, Spotify, SoundCloud, Instagram, TikTok… cole o link e pronto.")
         self.header.bind("<Configure>", self._draw_header)
 
         body = tk.Frame(self, bg=THEME["bg"], padx=18, pady=14)
@@ -479,6 +576,20 @@ class App(tk.Tk):
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
 
+        login_row = tk.Frame(card, bg=THEME["card"])
+        login_row.grid(row=7, column=0, sticky="ew", pady=(10, 0))
+        tk.Label(login_row, text="Login:", bg=THEME["card"], fg=THEME["muted"],
+                 font=FONT).pack(side="left")
+        login_box = ttk.Combobox(login_row, textvariable=self.login_var, state="readonly", width=22,
+                                 values=[LOGIN_NONE, LOGIN_FIREFOX, LOGIN_FILE], font=FONT)
+        login_box.pack(side="left", padx=6)
+        login_box.bind("<<ComboboxSelected>>", self._on_login_change)
+        tk.Label(login_row, textvariable=self.login_info_var, bg=THEME["card"], fg=THEME["cyan"],
+                 font=FONT_SMALL).pack(side="left", padx=4)
+        self._button(login_row, "?", lambda: messagebox.showinfo("Login", LOGIN_HELP),
+                     THEME["field"], THEME["border"], fg=THEME["yellow"]).pack(side="right")
+        self._update_login_info()
+
         actions = tk.Frame(body, bg=THEME["bg"])
         actions.pack(fill="x", pady=(14, 10))
         self.download_btn = self._button(actions, "⬇  Baixar", self._start, THEME["primary"],
@@ -533,6 +644,25 @@ class App(tk.Tk):
             hint = "M4A vai para Outros formatos\\<Artista>\\ (separado dos MP3)."
         self.hint_var.set(hint)
 
+    def _on_login_change(self, _event=None):
+        if self.login_var.get() == LOGIN_FILE:
+            path = filedialog.askopenfilename(
+                title="Escolha o arquivo cookies.txt",
+                filetypes=[("cookies.txt", "*.txt"), ("Todos os arquivos", "*.*")])
+            if path:
+                self.cookie_file = path
+            elif not Path(self.cookie_file).is_file():
+                self.login_var.set(LOGIN_NONE)
+        self._update_login_info()
+
+    def _update_login_info(self):
+        info = ""
+        if self.login_var.get() == LOGIN_FILE:
+            info = Path(self.cookie_file).name
+        elif self.login_var.get() == LOGIN_FIREFOX:
+            info = "(o Firefox precisa estar instalado e logado)"
+        self.login_info_var.set(info)
+
     def _paste(self):
         try:
             self.url_var.set(self.clipboard_get().strip())
@@ -557,11 +687,11 @@ class App(tk.Tk):
             tag = "head"
         elif msg.startswith(("✔", "Concluído")):
             tag = "ok"
-        elif msg.startswith("↷") or msg.startswith("Aviso") or msg.startswith("Esse arquivo"):
+        elif msg.startswith(("↷", "Aviso", "Esse arquivo")):
             tag = "warn"
         elif msg.startswith(("✖", "Erro", "ERROR", "Falhou", "FFmpeg não")):
             tag = "error"
-        elif msg.startswith(("Playlist", "Baixando a lista")):
+        elif msg.startswith(("Playlist", "Baixando a lista", "Spotify")):
             tag = "info"
         elif msg.startswith("Cancelado"):
             tag = "cancel"
@@ -589,11 +719,21 @@ class App(tk.Tk):
 
         mode, quality = self.mode_var.get(), self.quality_var.get()
         workers = max(1, min(8, self.workers_var.get()))
+        login_choice = self.login_var.get()
+        login = None
+        if login_choice == LOGIN_FIREFOX:
+            login = "firefox"
+        elif login_choice == LOGIN_FILE:
+            if not Path(self.cookie_file).is_file():
+                messagebox.showwarning("Login", "O arquivo cookies.txt não foi encontrado. Escolha de novo.")
+                return
+            login = self.cookie_file
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
-                                 "workers": workers})
+                                 "workers": workers, "login": login_choice,
+                                 "cookie_file": self.cookie_file})
         save_config(self.config_data)
 
-        opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
+        opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir, login)
         self.run_id += 1
         self.cancel_event = threading.Event()
         self._set_running(True)
@@ -620,8 +760,11 @@ class App(tk.Tk):
     def _run(self, run_id, cancel, url, mode, opts, workers):
         done, skipped = [], []
         finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
+        failures = []  # (posição, nome, motivo) — viram a lista de erros no final
         skipped_files = set()  # nomes que o yt-dlp avisou que já estavam na pasta
-        local = threading.local()  # cada download paralelo guarda o arquivo em que está mexendo
+        # Cada download paralelo guarda aqui o arquivo em que está mexendo, se terminou (ok)
+        # e a última mensagem de erro do yt-dlp.
+        local = threading.local()
         total = {"n": 1}
         started = time.time()
 
@@ -662,6 +805,7 @@ class App(tk.Tk):
             if d["status"] == "finished" and d["postprocessor"] == "MoveFiles":
                 info = d["info_dict"]
                 local.file = None
+                local.ok = True
                 name = info.get("musica") or info.get("title", "?")
                 if info.get("pasta_artista"):
                     name = f"{info['pasta_artista']} — {name}"
@@ -671,27 +815,44 @@ class App(tk.Tk):
                 done.append(name)
                 emit("log", f"✔ {name}")
 
+        def on_error(msg):
+            local.error = msg
+
         def new_ydl():
             ydl = yt_dlp.YoutubeDL(dict(
-                opts, logger=QueueLogger(emit, on_skip=skipped_files.add),
+                opts, logger=QueueLogger(emit, on_skip=skipped_files.add, on_error=on_error),
                 progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook]))
             if mode == "audio":
                 ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
             return ydl
 
-        def download_entry(entry, extra):
-            local.file = None
-            cancelled = False
+        def fail(index, name, reason):
+            failures.append((index, name, reason))
+            emit("log", f"✖ {f'Item {index}: ' if index else ''}{name} — {reason}")
+
+        def download_entry(index, entry, extra):
+            local.file, local.ok, local.error = None, False, None
+            cancelled, error = False, None
             try:
                 check_cancel()
                 with new_ydl() as ydl:
-                    ydl.extract_info(entry.get("url") or entry.get("webpage_url"),
-                                     ie_key=entry.get("ie_key"), extra_info=extra)
+                    target = entry
+                    if entry.get("search"):  # veio do Spotify: procura a música no YouTube
+                        found = ydl.extract_info(entry["url"], download=False, process=False)
+                        results = [r for r in (found or {}).get("entries") or [] if r]
+                        if not results:
+                            raise LookupError("Não encontrei essa música no YouTube")
+                        target = results[0]
+                    ydl.extract_info(target.get("url") or target.get("webpage_url"),
+                                     ie_key=target.get("ie_key"), extra_info=extra)
             except DownloadCancelled:
                 cancelled = True
-            except Exception:  # noqa: BLE001 — o logger do yt-dlp já mostrou o erro
-                emit("log", f"✖ Item {extra['playlist_index']} falhou, seguindo para o próximo.")
-            finished.append(extra["playlist_index"])
+            except Exception as exc:  # noqa: BLE001 — vira um item da lista de erros
+                error = str(exc)
+            finished.append(index)
+            if not cancelled and not local.ok:
+                fail(index, entry.get("title") or entry.get("url") or "?",
+                     explain_error(local.error or error))
             if not cancelled and total["n"] > 1:
                 pct, prefix = overall()
                 emit("progress", pct, prefix.strip())
@@ -700,54 +861,76 @@ class App(tk.Tk):
                 remove_partial_files(local.file, started)
 
         try:
-            # Busca as informações do link uma vez só (process=False: sem escolher formato nem
-            # baixar). Se for um item, o mesmo ydl reaproveita essas informações no download —
-            # tem que ser o mesmo, porque o YouTube recusa (403) links obtidos por outra sessão.
             main_ydl = new_ydl()
-            probe = main_ydl.extract_info(url, download=False, process=False)
-            while probe and probe.get("_type") == "url":  # links curtos, redirecionamentos
-                probe = main_ydl.extract_info(probe["url"], download=False, process=False,
-                                              ie_key=probe.get("ie_key"))
+            entries, is_list, probe = None, True, None
+            spotify = SPOTIFY_LINK.search(url)
+            if spotify:
+                emit("progress", 0, "Lendo a lista de músicas do Spotify…")
+                kind, title, tracks = read_spotify(url, main_ydl)
+                if not tracks:
+                    raise ValueError("Esse link do Spotify não tem músicas visíveis (ele é público?)")
+                suffix = " audio" if mode == "audio" else ""
+                entries = [{"search": True, "title": f"{artist} - {song}",
+                            "url": f"ytsearch1:{artist} - {song}{suffix}",
+                            "extra": {"spotify_artist": artist, "spotify_title": song}}
+                           for artist, song in tracks]
+                is_list = kind != "track"
+                emit("log", f"Spotify: {title} ({len(entries)} música(s)) — procurando cada uma no YouTube")
+                if len(tracks) >= SPOTIFY_EMBED_LIMIT:
+                    emit("log", f"Aviso: o Spotify só mostra as primeiras {SPOTIFY_EMBED_LIMIT} músicas "
+                                "de um link. Para playlists maiores, divida em playlists menores.")
+            else:
+                # Busca as informações do link uma vez só (process=False: sem escolher formato
+                # nem baixar). Se for um item, o mesmo ydl reaproveita essas informações no
+                # download — tem que ser o mesmo, porque o YouTube recusa (403) links obtidos
+                # por outra sessão.
+                probe = main_ydl.extract_info(url, download=False, process=False)
+                while probe and probe.get("_type") == "url":  # links curtos, redirecionamentos
+                    probe = main_ydl.extract_info(probe["url"], download=False, process=False,
+                                                  ie_key=probe.get("ie_key"))
+                if probe and probe.get("_type") in ("playlist", "multi_video"):
+                    entries = [e for e in probe.get("entries") or [] if e]
+                    title = probe.get("title") or "Playlist"
+                    # Itens em paralelo só quando a lista traz links (o normal no YouTube);
+                    # se o site já entregou os itens prontos, baixa na ordem pelo próprio yt-dlp.
+                    if all(e.get("_type") in ("url", "url_transparent") for e in entries):
+                        emit("log", f"Playlist: {title} ({len(entries)} itens) — baixando {workers} por vez")
+                    else:
+                        entries = None
+                        emit("log", "Baixando a lista em ordem, um item por vez.")
             check_cancel()
-
-            entries = None
-            if probe and probe.get("_type") in ("playlist", "multi_video"):
-                entries = [e for e in probe.get("entries") or [] if e]
-                # Itens em paralelo só quando a lista traz links (o normal no YouTube);
-                # se o site já entregou os itens prontos, baixa na ordem pelo próprio yt-dlp.
-                if not all(e.get("_type") in ("url", "url_transparent") for e in entries):
-                    entries = None
-                    emit("log", "Baixando a lista em ordem, um item por vez.")
 
             if entries is not None:
                 main_ydl.close()
-                title = probe.get("title") or "Playlist"
                 total["n"] = max(1, len(entries))
-                emit("log", f"Playlist: {title} ({len(entries)} itens) — baixando {workers} por vez")
                 emit("progress", 0, f"[0/{len(entries)} prontos] Começando…")
-                if mode == "video":
+                if mode == "video" and is_list:
                     opts = dict(opts, outtmpl={**opts["outtmpl"], "default": VIDEO_PLAYLIST_TMPL})
+                list_info = {"playlist": title, "playlist_title": title,
+                             "n_entries": len(entries), "playlist_count": len(entries)}
                 with ThreadPoolExecutor(max_workers=workers) as pool:
                     for index, entry in enumerate(entries, 1):
-                        pool.submit(download_entry, entry, {
-                            "playlist": title, "playlist_title": title, "playlist_index": index,
-                            "n_entries": len(entries), "playlist_count": len(entries)})
+                        extra = dict(entry.get("extra") or {})
+                        if is_list:
+                            extra.update(list_info, playlist_index=index)
+                        pool.submit(download_entry, index, entry, extra)
                 check_cancel()
                 summary = f"Concluído: {len(done)} baixado(s)"
                 if skipped:
                     summary += f", {len(skipped)} já existia(m)"
-                failed = max(0, len(entries) - len(done) - len(skipped))
-                if failed:
-                    summary += f", {failed} falharam (veja o registro)"
+                if failures:
+                    summary += f", {len(failures)} com erro (lista abaixo)"
                 summary += f" — de {len(entries)} itens em {format_duration(time.time() - started)}."
             else:
-                local.file = None
-                cancelled = False
+                local.file, local.ok, local.error = None, False, None
+                cancelled, error = False, None
                 try:
                     with main_ydl:
                         main_ydl.process_ie_result(probe, download=True)
                 except DownloadCancelled:
                     cancelled = True
+                except Exception as exc:  # noqa: BLE001 — vira a mensagem de erro abaixo
+                    error = str(exc)
                 if cancelled:
                     if local.file:
                         remove_partial_files(local.file, started)
@@ -757,13 +940,20 @@ class App(tk.Tk):
                 elif skipped:
                     summary = "Esse arquivo já estava na pasta."
                 else:
-                    summary = "Nada foi baixado (veja o registro)."
+                    reason = explain_error(local.error or error)
+                    failures.append((None, probe.get("title") or url, reason))
+                    summary = f"Falhou: {reason}"
             emit("done", summary)
+            if failures and total["n"] > 1:
+                emit("log", f"✖ Itens com erro ({len(failures)}):")
+                for index, name, reason in sorted(failures, key=lambda f: f[0] or 0):
+                    emit("log", f"✖    {index}. {name} — {reason}")
         except DownloadCancelled:
             pass
         except Exception as exc:  # noqa: BLE001 — qualquer erro do yt-dlp vai para a tela
-            emit("log", f"Erro: {exc}")
-            emit("done", "Falhou. Veja o registro abaixo.")
+            reason = explain_error(local.__dict__.get("error") or str(exc))
+            emit("log", f"✖ {reason}")
+            emit("done", f"Falhou: {reason}")
 
     def _poll_events(self):
         try:
@@ -777,7 +967,7 @@ class App(tk.Tk):
                     self.progress["value"] = data[0]
                     self.status_var.set(data[1])
                 elif kind == "done":
-                    failed = data[0].startswith(("Falhou", "Nada"))
+                    failed = data[0].startswith("Falhou")
                     self.progress.configure(
                         style=f"{'Error' if failed else 'Done'}.Horizontal.TProgressbar")
                     self.progress["value"] = 100

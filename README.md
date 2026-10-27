@@ -3,10 +3,36 @@
 ![Tela do programa](tela.png)
 
 Programa simples para Windows: cole um link, escolha **vídeo** ou **música** e a **qualidade**, e clique em **Baixar**.
-Se o link for de uma **playlist**, ele baixa todos os itens para uma pasta com o nome da playlist, numerados na ordem.
+Se o link for de uma **playlist**, ele baixa todos os itens.
 
 Funciona com YouTube, YouTube Music, SoundCloud, Vimeo, Instagram, TikTok, X/Twitter e
 [centenas de outros sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) (usa o [yt-dlp](https://github.com/yt-dlp/yt-dlp) por baixo).
+Não funciona com serviços protegidos contra cópia (DRM), como Netflix, Disney+ e o áudio do Spotify/Deezer.
+
+## Links do Spotify
+
+O Spotify não deixa baixar o áudio, mas dá para colar um link de **música, álbum ou playlist**
+do Spotify: o programa lê o nome e o artista de cada música, procura no YouTube e baixa de lá,
+já organizando em `Músicas\<Artista>\` com os nomes certos do Spotify.
+
+- A playlist precisa ser **pública**.
+- O Spotify mostra no máximo **100 músicas por link**; para playlists maiores, divida em partes.
+- A busca pega o primeiro resultado do YouTube; em músicas pouco conhecidas pode vir uma versão diferente.
+
+## Login (conteúdo com restrição)
+
+Para vídeos com restrição de idade, conteúdo de membros ou posts que só aparecem logado,
+use a opção **Login** (o botão **?** ao lado explica o passo a passo):
+
+- **Firefox**: lê o login do Firefox automaticamente.
+- **Chrome / Edge**: no Windows eles criptografam o login de um jeito que nenhum programa externo
+  consegue ler. Exporte um `cookies.txt` com a extensão *Get cookies.txt LOCALLY* e escolha
+  **Arquivo cookies.txt…** no programa. Guarde esse arquivo com cuidado: ele dá acesso à sua conta.
+
+## Lista de erros
+
+No fim de cada download, o registro mostra **quais itens deram erro e por quê**, em português
+(vídeo removido, privado, restrição de idade, bloqueado no país, música não encontrada no YouTube…).
 
 ## Como usar
 
