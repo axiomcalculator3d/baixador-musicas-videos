@@ -1,0 +1,2 @@
+# O .bat precisa de CRLF para o cmd do Windows ler direito
+*.bat -text

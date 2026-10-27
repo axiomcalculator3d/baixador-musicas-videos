@@ -1,0 +1,3 @@
+yt-dlp[default]
+# Runtime JavaScript que o yt-dlp precisa para liberar todas as qualidades do YouTube
+deno
