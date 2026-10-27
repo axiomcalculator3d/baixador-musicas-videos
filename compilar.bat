@@ -20,7 +20,7 @@ if errorlevel 1 goto :erro
 echo Compilando (leva alguns minutos)...
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name Baixador --icon icone.ico --add-data "icone.ico;." ^
-    --collect-data yt_dlp_ejs baixador.py
+    --collect-data yt_dlp_ejs --collect-submodules gallery_dl baixador.py
 if errorlevel 1 goto :erro
 
 echo.

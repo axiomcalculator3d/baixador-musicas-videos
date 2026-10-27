@@ -12,6 +12,7 @@ Organização na pasta escolhida (nomes das pastas no idioma escolhido):
 
 import gc
 import json
+import logging
 import os
 import queue
 import re
@@ -33,6 +34,13 @@ try:
     import qrcode
 except ImportError:  # sem o pacote, a janela Apoiar mostra só os códigos em texto
     qrcode = None
+try:  # gallery-dl: fotos e álbuns (formato "Imagens")
+    from gallery_dl import config as gdl_config
+    from gallery_dl import exception as gdl_exception
+    from gallery_dl import extractor as gdl_extractor
+    from gallery_dl import job as gdl_job
+except ImportError:
+    gdl_job = None
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import DownloadCancelled
 
@@ -48,6 +56,9 @@ DEFAULT_FOLDER = Path.home() / "Downloads" / "Baixador"
 WINGET_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet"
 # Programas externos que o yt-dlp usa, e o pacote do winget que instala cada um.
 REQUIRED_TOOLS = {"FFmpeg": "Gyan.FFmpeg.Essentials", "Deno": "DenoLand.Deno"}
+ARIA2_PACKAGE = "aria2.aria2"  # opcional: só para o "Download acelerado"
+# Onde achar cada programa dentro da pasta de pacotes do winget (os atalhos nem sempre são criados).
+WINGET_EXES = ("DenoLand.Deno*/**/deno.exe", "aria2.aria2*/**/aria2c.exe")
 
 
 def add_tools_to_path():
@@ -56,7 +67,7 @@ def add_tools_to_path():
     O winget só atualiza o PATH de programas abertos depois da instalação.
     """
     folders = [Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin"), WINGET_DIR / "Links"]
-    folders += [exe.parent for exe in (WINGET_DIR / "Packages").glob("DenoLand.Deno*/**/deno.exe")]
+    folders += [exe.parent for pattern in WINGET_EXES for exe in (WINGET_DIR / "Packages").glob(pattern)]
     known = os.environ.get("PATH", "").split(os.pathsep)
     extra = [str(f) for f in folders if f.is_dir() and str(f) not in known]
     os.environ["PATH"] = os.pathsep.join(extra + known)
@@ -90,6 +101,7 @@ AUDIO_QUALITIES = {
     "wav": ("wav", None),
 }
 AUDIO_EXT = {"vorbis": "ogg"}  # extensão do arquivo quando é diferente do nome do codec
+IMAGE_QUALITIES = {"original": None}  # imagens vêm do jeito que estão no site
 
 # Versões antigas guardavam no config.json o nome que aparecia na tela.
 LEGACY_QUALITIES = {
@@ -124,6 +136,7 @@ THEME = {
     "pink": "#ff4f8b",
     "pink_hover": "#ff75a5",
     "cyan": "#5ee0f5",
+    "teal": "#139fb0",
     "green": "#3ee0a1",
     "yellow": "#ffcb5c",
     "red": "#ff6b6b",
@@ -271,6 +284,7 @@ _ERROR_HINTS = [
     (r"DRM", "err_drm"),
     (r"timed out|Connection|getaddrinfo|unreachable", "err_network"),
     (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "err_ffmpeg"),
+    (r"no video formats|no video (could be )?found|there is no video|no media found", "err_no_video"),
 ]
 
 
@@ -290,6 +304,67 @@ def explain_error(msg):
     if not msg:
         return tr("err_unknown")
     return msg if len(msg) <= 150 else msg[:150] + "…"
+
+
+_IMAGE_HINTS = [
+    (r"auth|login|log in|401|403|cookies|private", "images_login"),
+    (r"404|not ?found|no results|does not exist", "images_none"),
+]
+
+
+def explain_image_error(messages):
+    text = " | ".join(messages)
+    for pattern, key in _IMAGE_HINTS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return tr(key)
+    return (messages[-1][:150] if messages else "") or tr("images_none")
+
+
+class _ErrorCollector(logging.Handler):
+    """Junta as mensagens de erro do gallery-dl (ele avisa pelo módulo logging)."""
+
+    def __init__(self, messages):
+        super().__init__(level=logging.ERROR)
+        self.messages = messages
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+if gdl_job is not None:
+    class ImageJob(gdl_job.DownloadJob):
+        """Download do gallery-dl avisando cada imagem salva ou pulada, e que pode ser parado."""
+
+        def __init__(self, url, on_saved, on_skipped, should_stop):
+            super().__init__(url)
+            self.on_saved, self.on_skipped, self.should_stop = on_saved, on_skipped, should_stop
+            self._skipped = False
+
+        def handle_url(self, url, kwdict):
+            if self.should_stop():
+                raise gdl_exception.StopExtraction()
+            self._skipped = False
+            status = self.status
+            super().handle_url(url, kwdict)
+            name = Path(self.pathfmt.path or "").name
+            if self._skipped:
+                self.on_skipped(name)
+            elif self.status == status:
+                self.on_saved(name)
+
+        def handle_skip(self):
+            self._skipped = True
+            super().handle_skip()
+
+
+def stop_child_downloads():
+    """Fecha os aria2c abertos por este programa (o yt-dlp espera o aria2c terminar sozinho)."""
+    if os.name != "nt":
+        return
+    command = (f"Get-CimInstance Win32_Process -Filter \"ParentProcessId={os.getpid()} AND "
+               "Name='aria2c.exe'\" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+    subprocess.run(["powershell", "-NoProfile", "-Command", command], capture_output=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def _emv(field_id, value):
@@ -362,7 +437,7 @@ def save_config(data):
         pass
 
 
-def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
+def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated=False):
     templates = output_templates()
     opts = {
         # pl_thumbnail vazio: não salva a capa da playlist como arquivo solto.
@@ -381,6 +456,10 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
     }
     if ffmpeg_dir:
         opts["ffmpeg_location"] = ffmpeg_dir
+    if accelerated and shutil.which("aria2c"):
+        # aria2 baixa cada arquivo por várias conexões ao mesmo tempo. Em vídeos fragmentados
+        # (HLS/DASH) o yt-dlp continua usando o próprio downloader.
+        opts["external_downloader"] = {"default": "aria2c"}
 
     if mode == "video":
         height = VIDEO_QUALITIES[quality]
@@ -475,14 +554,16 @@ class ClaimTarget(PostProcessor):
     (Clipe)" e "Música (Letra)"), o segundo é marcado como repetido em vez de "já existia".
     """
 
-    def __init__(self, claimed, lock, final_ext):
+    def __init__(self, claimed, lock, final_ext, on_claim=None):
         super().__init__()
-        self.claimed, self.lock, self.final_ext = claimed, lock, final_ext
+        self.claimed, self.lock, self.final_ext, self.on_claim = claimed, lock, final_ext, on_claim
 
     def run(self, info):
         path = Path(info.get("_filename") or info.get("filepath") or "")
         if self.final_ext:
             path = path.with_suffix("." + self.final_ext)
+        if self.on_claim:  # guarda o arquivo, para apagar os pedaços se o download for cancelado
+            self.on_claim(str(path))
         key = path_key(path)
         with self.lock:
             if key in self.claimed:
@@ -563,8 +644,8 @@ class App(tk.Tk):
         self.config_data = load_config()
         set_language(self.config_data.get("language") or system_language())
         self.title(tr("app_title"))
-        self.geometry("780x790")
-        self.minsize(660, 670)
+        self.geometry("800x820")
+        self.minsize(700, 700)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -587,6 +668,8 @@ class App(tk.Tk):
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
         self.pacing_var = tk.BooleanVar(value=self.config_data.get("pacing", True))
+        self.aria2_var = tk.BooleanVar(value=self.config_data.get("aria2", False)
+                                       and bool(shutil.which("aria2c")))
         self.status_var = tk.StringVar(value=tr("status_ready"))
         self.hint_var = tk.StringVar()
 
@@ -754,7 +837,8 @@ class App(tk.Tk):
         toggles.pack(anchor="w", pady=(4, 0))
         self.mode_buttons = {}
         for value, text, color in (("video", tr("mode_video"), THEME["primary"]),
-                                   ("audio", tr("mode_audio"), THEME["pink"])):
+                                   ("audio", tr("mode_audio"), THEME["pink"]),
+                                   ("images", tr("mode_images"), THEME["teal"])):
             btn = tk.Radiobutton(toggles, text=text, value=value, variable=self.mode_var,
                                  command=self._on_mode_change, indicatoron=0, selectcolor=color,
                                  bg=THEME["field"], fg=THEME["muted"], activebackground=THEME["border"],
@@ -790,11 +874,14 @@ class App(tk.Tk):
                  font=FONT).pack(side="left")
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
-        tk.Checkbutton(card, text=tr("pacing_option"), variable=self.pacing_var,
-                       bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
-                       activebackground=THEME["card"], activeforeground=THEME["fg"],
-                       highlightthickness=0, bd=0, font=FONT, cursor="hand2").grid(
-            row=7, column=0, sticky="w", pady=(6, 0))
+        for row, (text, var, command) in enumerate(
+                ((tr("pacing_option"), self.pacing_var, None),
+                 (tr("aria2_option"), self.aria2_var, self._on_aria2_toggle)), start=7):
+            tk.Checkbutton(card, text=text, variable=var, command=command,
+                           bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
+                           activebackground=THEME["card"], activeforeground=THEME["fg"],
+                           highlightthickness=0, bd=0, font=FONT, cursor="hand2").grid(
+                row=row, column=0, sticky="w", pady=(6, 0))
 
         actions = tk.Frame(body, bg=THEME["bg"])
         actions.pack(fill="x", pady=(14, 10))
@@ -865,7 +952,8 @@ class App(tk.Tk):
         return self.quality_ids.get(self.quality_var.get())
 
     def _fill_qualities(self, selected=None):
-        options = VIDEO_QUALITIES if self.mode_var.get() == "video" else AUDIO_QUALITIES
+        options = {"video": VIDEO_QUALITIES, "audio": AUDIO_QUALITIES,
+                   "images": IMAGE_QUALITIES}[self.mode_var.get()]
         self.quality_ids = {quality_label(q): q for q in options}
         for value, btn in self.mode_buttons.items():
             btn.configure(fg="white" if value == self.mode_var.get() else THEME["muted"])
@@ -880,7 +968,9 @@ class App(tk.Tk):
 
     def _update_hint(self):
         quality = self._quality_id() or ""
-        if self.mode_var.get() == "video":
+        if self.mode_var.get() == "images":
+            hint = tr("hint_images", images=tr("folder_images"))
+        elif self.mode_var.get() == "video":
             hint = tr("hint_video", videos=tr("folder_videos"))
         elif quality.startswith("mp3"):
             hint = tr("hint_mp3", music=tr("folder_music"))
@@ -889,6 +979,26 @@ class App(tk.Tk):
             if quality in ("flac", "wav"):
                 hint += tr("hint_lossless")
         self.hint_var.set(hint)
+
+    def _on_aria2_toggle(self):
+        """Ao ligar o download acelerado sem o aria2 instalado, oferece instalar pelo winget."""
+        if not self.aria2_var.get() or shutil.which("aria2c"):
+            return
+        if not shutil.which("winget") or not messagebox.askyesno("aria2", tr("aria2_ask")):
+            self.aria2_var.set(False)
+            return
+        self.installing = True
+        self._set_enabled(self.download_btn, False)
+        self.status_var.set(tr("aria2_installing"))
+
+        def install():
+            subprocess.run(["winget", "install", "-e", "--id", ARIA2_PACKAGE, "--silent",
+                            "--accept-package-agreements", "--accept-source-agreements"],
+                           capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            add_tools_to_path()
+            self.events.put((None, "aria2_done", bool(shutil.which("aria2c"))))
+
+        threading.Thread(target=install, daemon=True).start()
 
     def _show_support(self):
         win = tk.Toplevel(self)
@@ -995,13 +1105,12 @@ class App(tk.Tk):
 
         mode, quality = self.mode_var.get(), self._quality_id()
         workers = max(1, min(8, self.workers_var.get()))
-        pacing = self.pacing_var.get()
+        pacing, accelerated = self.pacing_var.get(), self.aria2_var.get()
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
                                  "workers": workers, "language": current_language(),
-                                 "pacing": pacing})
+                                 "pacing": pacing, "aria2": accelerated})
         save_config(self.config_data)
 
-        opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
         self.run_id += 1
         self.cancel_event = threading.Event()
         self._set_running(True)
@@ -1010,9 +1119,15 @@ class App(tk.Tk):
         self.status_var.set(tr("status_fetching"))
         self._log(f"\n=== {url} ({self.quality_var.get()}) ===", "head")
 
-        self.worker = threading.Thread(
-            target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts, workers, pacing),
-            daemon=True)
+        if mode == "images":
+            target, args = self._run_images, (self.run_id, self.cancel_event, url, folder)
+        else:
+            if accelerated:
+                self._log(tr("aria2_note"), "info")
+            opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir,
+                                 accelerated)
+            target, args = self._run, (self.run_id, self.cancel_event, url, mode, opts, workers, pacing)
+        self.worker = threading.Thread(target=target, args=args, daemon=True)
         self.worker.start()
 
     def _cancel(self):
@@ -1025,6 +1140,68 @@ class App(tk.Tk):
         self.progress["value"] = 100
         self.status_var.set(tr("status_cancelled"))
         self._log(tr("log_cancelled"), "cancel")
+        if self.aria2_var.get():
+            # O aria2 não para sozinho: fecha os que este programa abriu até o download parar
+            # (vídeo + áudio são dois arquivos, e o yt-dlp abriria outro aria2 para o segundo).
+            worker = self.worker
+
+            def stop_until_finished():
+                while worker is not None and worker.is_alive():
+                    stop_child_downloads()
+                    time.sleep(0.3)
+
+            threading.Thread(target=stop_until_finished, daemon=True).start()
+
+    def _run_images(self, run_id, cancel, url, folder):
+        """Fotos e álbuns pelo gallery-dl (Instagram, Pinterest, Reddit, X, DeviantArt…)."""
+        started = time.time()
+        saved, skipped, errors = [], [], []
+
+        def emit(kind, *data):
+            self.events.put((run_id, kind, *data))
+
+        def on_saved(name):
+            saved.append(name)
+            emit("log", f"✔ {name}", "ok")
+            emit("progress", 0, tr("images_progress", n=len(saved)))
+
+        def on_skipped(name):
+            # A mesma imagem pode aparecer mais de uma vez na página (ex.: versões anteriores);
+            # se acabou de ser salva neste download, não é "já existia".
+            if name in saved or name in skipped:
+                return
+            skipped.append(name)
+            emit("log", tr("already_existed", name=name), "warn")
+
+        if gdl_job is None or not gdl_extractor.find(url):
+            reason = tr("images_unsupported")
+            emit("log", f"✖ {reason}", "error")
+            emit("done", tr("failed", reason=reason), True)
+            return
+        gdl_config.clear()
+        gdl_config.set((), "base-directory", str(Path(folder) / tr("folder_images")))
+        gdl_config.set(("output",), "mode", False)  # sem mensagens do gallery-dl no console
+        collector = _ErrorCollector(errors)
+        logging.getLogger().addHandler(collector)
+        try:
+            ImageJob(url, on_saved, on_skipped, cancel.is_set).run()
+        except Exception as exc:  # noqa: BLE001 — vira a mensagem de erro abaixo
+            errors.append(str(exc))
+        finally:
+            logging.getLogger().removeHandler(collector)
+        if cancel.is_set():
+            return
+        if saved or skipped:
+            summary = tr("images_done", n=len(saved))
+            if skipped:
+                summary += tr("sum_skipped", n=len(skipped))
+            summary += tr("sum_total", n=len(saved) + len(skipped),
+                          time=format_duration(time.time() - started))
+            emit("done", summary, False, not errors)
+        else:
+            reason = explain_image_error(errors)
+            emit("log", f"✖ {reason}", "error")
+            emit("done", tr("failed", reason=reason), True)
 
     def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True):
         done, skipped, repeated = [], [], []
@@ -1098,7 +1275,8 @@ class App(tk.Tk):
                 progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook]))
             if mode == "audio":
                 ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
-            ydl.add_post_processor(ClaimTarget(claimed, claim_lock, opts.get("final_ext")),
+            ydl.add_post_processor(ClaimTarget(claimed, claim_lock, opts.get("final_ext"),
+                                               on_claim=lambda path: setattr(local, "file", path)),
                                    when="before_dl")
             return ydl
 
@@ -1151,6 +1329,8 @@ class App(tk.Tk):
                 cancelled = True
             except Exception as exc:  # noqa: BLE001 — vira um item da lista de erros
                 error = str(exc)
+            # Com o aria2, cancelar fecha o processo dele e o yt-dlp vê isso como um erro comum.
+            cancelled = cancelled or cancel.is_set()
             finished.append(index)
             if not cancelled and not local.ok:
                 if error_kind(local.error or error) == "err_ratelimit":
@@ -1258,6 +1438,7 @@ class App(tk.Tk):
                     cancelled = True
                 except Exception as exc:  # noqa: BLE001 — vira a mensagem de erro abaixo
                     error = str(exc)
+                cancelled = cancelled or cancel.is_set()  # aria2 fechado pelo Cancelar
                 if cancelled:
                     if local.file:
                         remove_partial_files(local.file, started)
@@ -1291,6 +1472,14 @@ class App(tk.Tk):
                 run_id, kind, *data = self.events.get_nowait()
                 if kind == "tools_done":
                     self._tools_done(*data)
+                    continue
+                if kind == "aria2_done":
+                    self.installing = False
+                    self._set_enabled(self.download_btn, not self.running)
+                    self.aria2_var.set(data[0])
+                    self._log(tr("aria2_installed" if data[0] else "aria2_failed"),
+                              "ok" if data[0] else "error")
+                    self.status_var.set(tr("status_ready"))
                     continue
                 if run_id != self.run_id:
                     continue  # evento de um download já cancelado

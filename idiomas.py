@@ -113,6 +113,25 @@ TEXTS = {
         "err_network": "Problema de conexão com a internet",
         "err_ffmpeg": "Falha ao converter o arquivo (FFmpeg)",
         "err_unknown": "Motivo desconhecido",
+        "mode_images": "▣  Imagens",
+        "q_original": "Original (como está no site)",
+        "folder_images": "Imagens",
+        "hint_images": "Fotos e álbuns vão para {images}\\<site>\\… (Pinterest, Reddit, Imgur, "
+                       "Tumblr, DeviantArt, Instagram/X quando públicos).",
+        "images_unsupported": "Esse site não tem suporte para baixar imagens",
+        "images_done": "Concluído: {n} imagem(ns) baixada(s)",
+        "images_none": "Nenhuma imagem encontrada nesse link (o post é público?)",
+        "images_login": "Esse site só mostra essas imagens para quem está logado",
+        "images_progress": "Baixando imagens… {n} salva(s)",
+        "err_no_video": "Esse link não tem vídeo (se for um post de fotos, use o formato Imagens)",
+        "aria2_option": "Download acelerado com aria2 (várias conexões por arquivo)",
+        "aria2_ask": "O download acelerado usa o aria2, que não está instalado.\n\n"
+                     "Instalar agora pelo instalador oficial do Windows (winget)? São cerca de 5 MB.",
+        "aria2_installing": "Instalando o aria2…",
+        "aria2_installed": "✔ aria2 instalado: download acelerado ligado.",
+        "aria2_failed": "Não consegui instalar o aria2; o download continua no modo normal.",
+        "aria2_note": "Download acelerado (aria2) ligado: a porcentagem de cada arquivo não aparece "
+                      "enquanto ele baixa.",
         "err_ratelimit": "O YouTube limitou este computador por excesso de downloads (até 1 hora)",
         "pacing_option": "Evitar o bloqueio do YouTube (pausa sozinho perto do limite por hora)",
         "pacing_wait": "⏳ Pausa para o YouTube não bloquear: continua em {time} "
@@ -228,6 +247,25 @@ TEXTS = {
         "err_network": "Internet connection problem",
         "err_ffmpeg": "Failed to convert the file (FFmpeg)",
         "err_unknown": "Unknown reason",
+        "mode_images": "▣  Images",
+        "q_original": "Original (as on the site)",
+        "folder_images": "Images",
+        "hint_images": "Photos and albums go to {images}\\<site>\\… (Pinterest, Reddit, Imgur, "
+                       "Tumblr, DeviantArt, Instagram/X when public).",
+        "images_unsupported": "This site isn't supported for downloading images",
+        "images_done": "Done: {n} image(s) downloaded",
+        "images_none": "No images found at this link (is the post public?)",
+        "images_login": "This site only shows these images to signed-in users",
+        "images_progress": "Downloading images… {n} saved",
+        "err_no_video": "This link has no video (if it's a photo post, use the Images format)",
+        "aria2_option": "Faster download with aria2 (several connections per file)",
+        "aria2_ask": "Faster download uses aria2, which isn't installed.\n\n"
+                     "Install it now with the official Windows installer (winget)? It's about 5 MB.",
+        "aria2_installing": "Installing aria2…",
+        "aria2_installed": "✔ aria2 installed: faster download is on.",
+        "aria2_failed": "Couldn't install aria2; downloads continue in normal mode.",
+        "aria2_note": "Faster download (aria2) is on: each file's percentage isn't shown "
+                      "while it downloads.",
         "err_ratelimit": "YouTube rate-limited this computer for too many downloads (up to 1 hour)",
         "pacing_option": "Avoid YouTube blocking (pauses by itself near the hourly limit)",
         "pacing_wait": "⏳ Pausing so YouTube won't block: resumes in {time} "
@@ -344,6 +382,25 @@ TEXTS = {
         "err_network": "Problema de conexión a internet",
         "err_ffmpeg": "Error al convertir el archivo (FFmpeg)",
         "err_unknown": "Motivo desconocido",
+        "mode_images": "▣  Imágenes",
+        "q_original": "Original (como está en el sitio)",
+        "folder_images": "Imágenes",
+        "hint_images": "Las fotos y álbumes van a {images}\\<sitio>\\… (Pinterest, Reddit, Imgur, "
+                       "Tumblr, DeviantArt, Instagram/X si son públicos).",
+        "images_unsupported": "Este sitio no es compatible para descargar imágenes",
+        "images_done": "Listo: {n} imagen(es) descargada(s)",
+        "images_none": "No se encontraron imágenes en este enlace (¿la publicación es pública?)",
+        "images_login": "Este sitio solo muestra estas imágenes a quien inició sesión",
+        "images_progress": "Descargando imágenes… {n} guardada(s)",
+        "err_no_video": "Este enlace no tiene video (si es una publicación de fotos, usa el formato Imágenes)",
+        "aria2_option": "Descarga acelerada con aria2 (varias conexiones por archivo)",
+        "aria2_ask": "La descarga acelerada usa aria2, que no está instalado.\n\n"
+                     "¿Instalarlo ahora con el instalador oficial de Windows (winget)? Son unos 5 MB.",
+        "aria2_installing": "Instalando aria2…",
+        "aria2_installed": "✔ aria2 instalado: descarga acelerada activada.",
+        "aria2_failed": "No pude instalar aria2; la descarga sigue en modo normal.",
+        "aria2_note": "Descarga acelerada (aria2) activada: el porcentaje de cada archivo no se "
+                      "muestra mientras se descarga.",
         "err_ratelimit": "YouTube limitó este equipo por exceso de descargas (hasta 1 hora)",
         "pacing_option": "Evitar el bloqueo de YouTube (pausa solo cerca del límite por hora)",
         "pacing_wait": "⏳ Pausa para que YouTube no bloquee: continúa en {time} "

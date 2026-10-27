@@ -3,3 +3,5 @@ yt-dlp[default]
 deno
 # QR Code da janela "Apoiar"
 qrcode
+# Formato "Imagens": fotos e álbuns (Instagram, Pinterest, Reddit, X...)
+gallery-dl

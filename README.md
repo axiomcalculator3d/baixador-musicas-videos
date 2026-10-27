@@ -9,6 +9,24 @@ Funciona com YouTube, YouTube Music, SoundCloud, Vimeo, Instagram, TikTok, X/Twi
 [centenas de outros sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) (usa o [yt-dlp](https://github.com/yt-dlp/yt-dlp) por baixo).
 Não funciona com serviços protegidos contra cópia (DRM), como Netflix, Disney+ e o áudio do Spotify/Deezer.
 
+## Imagens (fotos e álbuns)
+
+O formato **▣ Imagens** baixa fotos e álbuns com o [gallery-dl](https://github.com/mikf/gallery-dl):
+Pinterest, Reddit, Imgur, Tumblr, DeviantArt, Flickr, Wikimedia e
+[muitos outros sites](https://github.com/mikf/gallery-dl/blob/master/docs/supportedsites.md).
+Os arquivos vão para `Imagens\<site>\…`, do jeito que estão no site.
+
+- Instagram e X/Twitter hoje mostram quase tudo só para quem está logado; como o programa não
+  usa login, nesses sites só funcionam alguns posts públicos.
+- Se colar um post de fotos no formato Vídeo, o programa avisa que o link não tem vídeo.
+
+## Download acelerado (aria2)
+
+A opção **Download acelerado com aria2** baixa cada arquivo por várias conexões ao mesmo tempo.
+Ajuda principalmente em sites lentos e arquivos grandes; no YouTube o ganho é pequeno
+(num teste, 5,8 → 6,9 MB/s). Na primeira vez que ligar, o programa oferece instalar o aria2 (~5 MB).
+Com ela ligada, a porcentagem de cada arquivo não aparece enquanto baixa.
+
 ## Executável (Baixador.exe)
 
 Também dá para usar como **um arquivo só**, sem Python e sem `iniciar.bat`:
