@@ -103,7 +103,11 @@ FONT_MONO_BOLD = ("Consolas", 9, "bold")
 PIX_KEY = "+5538988235328"
 PIX_NAME = "Francisley Campos"
 PIX_CITY = "Brasil"
-LIGHTNING_ADDRESS = ""  # ex.: "voce@walletofsatoshi.com"; vazio esconde a parte do Bitcoin
+# Bitcoin Lightning (Wallet of Satoshi). O LNURL vai no QR Code; o endereço é a forma curta
+# do mesmo destino, para digitar. Os dois vazios escondem a parte do Bitcoin.
+LIGHTNING_LNURL = ("LNURL1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7TNHV4KXCTTTDEHHWM30D3H82UNVWQ"
+                   "HHQMRFV93XCETDV4UXJCMPDCERJK07WLP")
+LIGHTNING_ADDRESS = "pliablemexican29@walletofsatoshi.com"
 
 VIDEO_TMPL = "Vídeos/%(title).150B.%(ext)s"
 VIDEO_PLAYLIST_TMPL = "Vídeos/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s"
@@ -697,10 +701,11 @@ class App(tk.Tk):
         pix = pix_copia_e_cola(PIX_KEY, PIX_NAME, PIX_CITY)
         self._support_card(cards, "Pix", pix, f"Chave (celular): {PIX_KEY}", THEME["green"], feedback,
                            [("Copiar Pix copia e cola", pix), ("Copiar chave", PIX_KEY)])
-        if LIGHTNING_ADDRESS:
-            self._support_card(cards, "⚡ Bitcoin Lightning", f"lightning:{LIGHTNING_ADDRESS}",
+        if LIGHTNING_LNURL:
+            self._support_card(cards, "⚡ Bitcoin Lightning", LIGHTNING_LNURL,
                                LIGHTNING_ADDRESS, THEME["yellow"], feedback,
-                               [("Copiar endereço Lightning", LIGHTNING_ADDRESS)])
+                               [("Copiar endereço Lightning", LIGHTNING_ADDRESS),
+                                ("Copiar LNURL", LIGHTNING_LNURL)])
         tk.Label(win, textvariable=feedback, bg=THEME["bg"], fg=THEME["green"],
                  font=FONT_BOLD).pack(pady=(0, 14))
         if os.name == "nt":
@@ -1066,7 +1071,7 @@ class App(tk.Tk):
                     self._set_running(False)
                     if not failed and not self.support_hint_shown:  # uma vez por sessão
                         self.support_hint_shown = True
-                        self._log("♥ O programa te ajudou? Apoie com um Pix de qualquer valor "
+                        self._log("♥ O programa te ajudou? Apoie com Pix ou Bitcoin, de qualquer valor, "
                                   "no botão Apoiar. Obrigado!")
         except queue.Empty:
             pass
