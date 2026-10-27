@@ -48,12 +48,19 @@ VIDEO_QUALITIES = {
     "360p": 360,
 }
 
+# rótulo na tela -> (codec do FFmpeg, qualidade). Qualidade abaixo de 10 é escala VBR (0 = melhor).
 AUDIO_QUALITIES = {
     "MP3 320 kbps": ("mp3", "320"),
+    "MP3 256 kbps": ("mp3", "256"),
     "MP3 192 kbps": ("mp3", "192"),
     "MP3 128 kbps": ("mp3", "128"),
-    "M4A (melhor, sem conversão)": ("m4a", None),
+    "M4A / AAC (original, sem conversão)": ("m4a", None),
+    "OPUS (original, arquivo menor)": ("opus", None),
+    "OGG Vorbis (alta qualidade)": ("vorbis", "1"),
+    "FLAC (sem perda, arquivo grande)": ("flac", None),
+    "WAV (sem compressão, arquivo enorme)": ("wav", None),
 }
+AUDIO_EXT = {"vorbis": "ogg"}  # extensão do arquivo quando é diferente do nome do codec
 
 # Tema escuro roxo/rosa com destaques coloridos.
 THEME = {
@@ -264,26 +271,51 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
         opts["merge_output_format"] = "mp4"
     else:
         codec, kbps = AUDIO_QUALITIES[quality]
-        opts["writethumbnail"] = True
         # final_ext faz o yt-dlp pular músicas que já estão na pasta, sem baixar de novo.
-        opts["final_ext"] = codec
-        if codec == "mp3":
-            opts["outtmpl"]["default"] = MP3_TMPL
-            opts["format"] = "ba/b"
-            opts["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": kbps},
-            ]
-        else:
-            opts["outtmpl"]["default"] = OTHER_AUDIO_TMPL
-            opts["format"] = "ba[ext=m4a]/ba/b"
-            opts["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
-            ]
-        opts["postprocessors"] += [
+        opts["final_ext"] = AUDIO_EXT.get(codec, codec)
+        opts["outtmpl"]["default"] = MP3_TMPL if codec == "mp3" else OTHER_AUDIO_TMPL
+        # M4A e OPUS: pega o áudio que já vem nesse formato, assim não precisa converter.
+        opts["format"] = {"m4a": "ba[ext=m4a]/ba/b", "opus": "ba[acodec=opus]/ba/b"}.get(codec, "ba/b")
+        opts["postprocessors"] = [
+            {"key": "FFmpegExtractAudio", "preferredcodec": codec, "preferredquality": kbps},
             {"key": "FFmpegMetadata", "add_metadata": True},
-            {"key": "EmbedThumbnail"},
         ]
+        if codec != "wav":  # WAV não aceita capa embutida
+            opts["writethumbnail"] = True
+            opts["postprocessors"].append({"key": "EmbedThumbnail"})
     return opts
+
+
+def path_key(path):
+    """Mesmo arquivo = mesma chave, independente de maiúsculas e barras (Windows)."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+class AlreadyInThisRun(DownloadCancelled):
+    """Outro item da mesma lista já gerou este arquivo agora (música repetida na lista)."""
+
+
+class ClaimTarget(PostProcessor):
+    """Roda antes de baixar: reserva o arquivo final para este item.
+
+    Se dois itens da lista dão no mesmo arquivo (a mesma música duas vezes, ou "Música
+    (Clipe)" e "Música (Letra)"), o segundo é marcado como repetido em vez de "já existia".
+    """
+
+    def __init__(self, claimed, lock, final_ext):
+        super().__init__()
+        self.claimed, self.lock, self.final_ext = claimed, lock, final_ext
+
+    def run(self, info):
+        path = Path(info.get("_filename") or info.get("filepath") or "")
+        if self.final_ext:
+            path = path.with_suffix("." + self.final_ext)
+        key = path_key(path)
+        with self.lock:
+            if key in self.claimed:
+                raise AlreadyInThisRun(path.name)
+            self.claimed.add(key)
+        return [], info
 
 
 def remove_partial_files(final_path, since):
@@ -337,10 +369,10 @@ class QueueLogger:
                            "[download] Downloading item")):
             self.emit("log", msg)
         elif msg.startswith("[download] ") and msg.endswith("has already been downloaded"):
-            name = Path(msg[len("[download] "):-len(" has already been downloaded")]).name
-            self.emit("log", f"↷ Já existia, pulando: {name}")
+            path = msg[len("[download] "):-len(" has already been downloaded")]
+            self.emit("log", f"↷ Já existia na pasta, pulando: {Path(path).name}")
             if self.on_skip:
-                self.on_skip(name)
+                self.on_skip(path_key(path))
 
     def warning(self, msg):
         self.emit("log", f"Aviso: {msg}")
@@ -601,7 +633,10 @@ class App(tk.Tk):
         elif self.quality_var.get().startswith("MP3"):
             hint = "MP3 vão para Músicas\\<Artista>\\<Música>.mp3 — cada artista na sua pasta."
         else:
-            hint = "M4A vai para Outros formatos\\<Artista>\\ (separado dos MP3)."
+            name = self.quality_var.get().split(" ")[0]
+            hint = f"{name} vai para Outros formatos\\<Artista>\\ (separado dos MP3)."
+            if name in ("FLAC", "WAV"):
+                hint += " A qualidade é a mesma da fonte (o YouTube não tem áudio sem perda)."
         self.hint_var.set(hint)
 
     def _paste(self):
@@ -689,10 +724,11 @@ class App(tk.Tk):
         self._log("Cancelado pelo usuário.")
 
     def _run(self, run_id, cancel, url, mode, opts, workers):
-        done, skipped = [], []
+        done, skipped, repeated = [], [], []
         finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
         failures = []  # (posição, nome, motivo) — viram a lista de erros no final
-        skipped_files = set()  # nomes que o yt-dlp avisou que já estavam na pasta
+        skipped_files = set()  # arquivos (caminho completo) que já estavam na pasta antes
+        claimed, claim_lock = set(), threading.Lock()  # arquivos que algum item desta lista já pegou
         # Cada download paralelo guarda aqui o arquivo em que está mexendo, se terminou (ok)
         # e a última mensagem de erro do yt-dlp.
         local = threading.local()
@@ -740,7 +776,7 @@ class App(tk.Tk):
                 name = info.get("musica") or info.get("title", "?")
                 if info.get("pasta_artista"):
                     name = f"{info['pasta_artista']} — {name}"
-                if Path(info.get("filepath") or "").name in skipped_files:
+                if path_key(info.get("filepath") or "") in skipped_files:
                     skipped.append(name)
                     return
                 done.append(name)
@@ -755,6 +791,8 @@ class App(tk.Tk):
                 progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook]))
             if mode == "audio":
                 ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
+            ydl.add_post_processor(ClaimTarget(claimed, claim_lock, opts.get("final_ext")),
+                                   when="before_dl")
             return ydl
 
         def fail(index, name, reason):
@@ -776,6 +814,10 @@ class App(tk.Tk):
                         target = results[0]
                     ydl.extract_info(target.get("url") or target.get("webpage_url"),
                                      ie_key=target.get("ie_key"), extra_info=extra)
+            except AlreadyInThisRun as exc:
+                local.ok = True
+                repeated.append(str(exc))
+                emit("log", f"↷ Repetida na lista (já baixada agora há pouco): {exc}")
             except DownloadCancelled:
                 cancelled = True
             except Exception as exc:  # noqa: BLE001 — vira um item da lista de erros
@@ -833,6 +875,20 @@ class App(tk.Tk):
 
             if entries is not None:
                 main_ydl.close()
+                # A mesma música duas vezes na lista (comum nos "Mix" do YouTube): baixa uma vez só.
+                list_size = len(entries)
+                unique, seen = [], set()
+                for entry in entries:
+                    key = (entry.get("id") or entry.get("title") or entry.get("url") or "").lower()
+                    if key and key in seen:
+                        repeated.append(entry.get("title") or key)
+                        continue
+                    seen.add(key)
+                    unique.append(entry)
+                if len(unique) < len(entries):
+                    emit("log", f"↷ {len(entries) - len(unique)} item(ns) repetido(s) na lista — "
+                                "cada música é baixada uma vez só.")
+                entries = unique
                 total["n"] = max(1, len(entries))
                 emit("progress", 0, f"[0/{len(entries)} prontos] Começando…")
                 if mode == "video" and is_list:
@@ -848,10 +904,12 @@ class App(tk.Tk):
                 check_cancel()
                 summary = f"Concluído: {len(done)} baixado(s)"
                 if skipped:
-                    summary += f", {len(skipped)} já existia(m)"
+                    summary += f", {len(skipped)} já existia(m) na pasta"
+                if repeated:
+                    summary += f", {len(repeated)} repetida(s) na lista"
                 if failures:
                     summary += f", {len(failures)} com erro (lista abaixo)"
-                summary += f" — de {len(entries)} itens em {format_duration(time.time() - started)}."
+                summary += f" — de {list_size} itens em {format_duration(time.time() - started)}."
             else:
                 local.file, local.ok, local.error = None, False, None
                 cancelled, error = False, None

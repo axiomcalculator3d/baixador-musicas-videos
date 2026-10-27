@@ -41,7 +41,10 @@ No fim de cada download, o registro mostra **quais itens deram erro e por quê**
 | Formato | Qualidades |
 |---|---|
 | Vídeo (MP4) | Melhor disponível, 4K, 2K, 1080p, 720p, 480p, 360p |
-| Música / Áudio | MP3 320 / 192 / 128 kbps, M4A original (sem perda por conversão) |
+| Música / Áudio | MP3 320 / 256 / 192 / 128 kbps, M4A/AAC e OPUS (originais, sem conversão), OGG Vorbis, FLAC, WAV |
+
+FLAC e WAV geram arquivos grandes, mas a qualidade é a mesma da fonte: o YouTube não tem áudio sem perda.
+WAV não guarda capa nem fica com a capa embutida; os outros formatos ficam com capa, artista e título.
 
 ## Como os arquivos ficam organizados
 
@@ -54,7 +57,7 @@ Músicas\
     Música 2.mp3
   Artista B\
     Música 3.mp3
-Outros formatos\          ← tudo que não é MP3 (ex.: M4A), também por artista
+Outros formatos\          ← tudo que não é MP3 (M4A, OPUS, OGG, FLAC, WAV), também por artista
   Artista A\
     Música 1.m4a
 Vídeos\
@@ -69,6 +72,8 @@ Vídeos\
   para o mesmo artista não virar duas pastas.
 - MP3/M4A já saem com capa e título/artista embutidos.
 - Músicas que já estão na pasta são puladas (não baixa de novo), e o resumo mostra quantas já existiam.
+- Se a mesma música aparece mais de uma vez na lista (comum nos "Mix" do YouTube), ela é baixada
+  uma vez só e o resumo mostra quantas eram repetidas.
 
 ## Velocidade
 
