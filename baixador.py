@@ -21,12 +21,18 @@ import sys
 import threading
 import time
 import tkinter as tk
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import yt_dlp
 from yt_dlp.networking import Request
+
+try:
+    import qrcode
+except ImportError:  # sem o pacote, a janela Apoiar mostra só os códigos em texto
+    qrcode = None
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import DownloadCancelled
 
@@ -92,6 +98,12 @@ FONT_LABEL = ("Segoe UI Semibold", 8)
 FONT_TITLE = ("Segoe UI Semibold", 18)
 FONT_MONO = ("Consolas", 9)
 FONT_MONO_BOLD = ("Consolas", 9, "bold")
+
+# Contribuições (janela "Apoiar"). A chave Pix é um celular, por isso o +55.
+PIX_KEY = "+5538988235328"
+PIX_NAME = "Francisley Campos"
+PIX_CITY = "Brasil"
+LIGHTNING_ADDRESS = ""  # ex.: "voce@walletofsatoshi.com"; vazio esconde a parte do Bitcoin
 
 VIDEO_TMPL = "Vídeos/%(title).150B.%(ext)s"
 VIDEO_PLAYLIST_TMPL = "Vídeos/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s"
@@ -217,6 +229,31 @@ def explain_error(msg):
     if not msg:
         return "Motivo desconhecido"
     return msg if len(msg) <= 150 else msg[:150] + "…"
+
+
+def _emv(field_id, value):
+    return f"{field_id}{len(value):02d}{value}"
+
+
+def _crc16(data):
+    crc = 0xFFFF
+    for byte in data.encode("utf-8"):
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021 if crc & 0x8000 else crc << 1) & 0xFFFF
+    return f"{crc:04X}"
+
+
+def pix_copia_e_cola(key, name, city, description="Apoio Baixador"):
+    """Código Pix "copia e cola" (BR Code do Banco Central), sem valor: quem paga escolhe."""
+    def plain(text, limit):  # o padrão só aceita letras sem acento
+        return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().upper()[:limit]
+
+    account = _emv("00", "br.gov.bcb.pix") + _emv("01", key) + _emv("02", description)
+    payload = (_emv("00", "01") + _emv("26", account) + _emv("52", "0000") + _emv("53", "986")
+               + _emv("58", "BR") + _emv("59", plain(name, 25)) + _emv("60", plain(city, 15))
+               + _emv("62", _emv("05", "***")) + "6304")
+    return payload + _crc16(payload)
 
 
 def find_ffmpeg():
@@ -398,6 +435,7 @@ class App(tk.Tk):
         self.cancel_event = threading.Event()
         self.worker = None
         self.running = False
+        self.support_hint_shown = False
         self.config_data = load_config()
         self.ffmpeg_dir = find_ffmpeg()
 
@@ -454,14 +492,15 @@ class App(tk.Tk):
                             lightcolor=border, darkcolor=border, gripcount=0, relief="flat")
             style.map(name, background=[("active", THEME["primary"]), ("!active", border)])
 
-    def _dark_title_bar(self):
+    def _dark_title_bar(self, window=None):
         """Windows 10/11: barra de título escura, combinando com a janela."""
+        window = window or self
         if os.name != "nt":
             return
         try:
             import ctypes
-            self.update_idletasks()
-            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            window.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
             dwm = ctypes.windll.dwmapi
             on = ctypes.c_int(1)
             dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(on), ctypes.sizeof(on))
@@ -594,6 +633,8 @@ class App(tk.Tk):
         self._set_enabled(self.cancel_btn, False)
         self._button(actions, "Abrir pasta", self._open_folder, THEME["field"], THEME["border"],
                      fg=THEME["yellow"]).pack(side="right", ipady=2)
+        self._button(actions, "♥  Apoiar", self._show_support, THEME["field"], THEME["border"],
+                     fg=THEME["pink"]).pack(side="right", padx=(0, 8), ipady=2)
 
         self.progress = ttk.Progressbar(body, maximum=100, style="Accent.Horizontal.TProgressbar")
         self.progress.pack(fill="x")
@@ -639,6 +680,66 @@ class App(tk.Tk):
                 hint += " A qualidade é a mesma da fonte (o YouTube não tem áudio sem perda)."
         self.hint_var.set(hint)
 
+    def _show_support(self):
+        win = tk.Toplevel(self)
+        win.title("Apoie o projeto")
+        win.configure(bg=THEME["bg"])
+        win.resizable(False, False)
+        win.transient(self)
+        tk.Label(win, text="♥  Apoie o Baixador", bg=THEME["bg"], fg=THEME["pink"],
+                 font=FONT_TITLE).pack(padx=24, pady=(18, 4))
+        tk.Label(win, text="Se o programa te ajudou, considere uma contribuição de qualquer valor.\n"
+                           "Isso ajuda a manter e melhorar o projeto. Obrigado!",
+                 bg=THEME["bg"], fg=THEME["fg"], font=FONT, justify="center").pack(padx=24)
+        cards = tk.Frame(win, bg=THEME["bg"])
+        cards.pack(padx=18, pady=(14, 6))
+        feedback = tk.StringVar()
+        pix = pix_copia_e_cola(PIX_KEY, PIX_NAME, PIX_CITY)
+        self._support_card(cards, "Pix", pix, f"Chave (celular): {PIX_KEY}", THEME["green"], feedback,
+                           [("Copiar Pix copia e cola", pix), ("Copiar chave", PIX_KEY)])
+        if LIGHTNING_ADDRESS:
+            self._support_card(cards, "⚡ Bitcoin Lightning", f"lightning:{LIGHTNING_ADDRESS}",
+                               LIGHTNING_ADDRESS, THEME["yellow"], feedback,
+                               [("Copiar endereço Lightning", LIGHTNING_ADDRESS)])
+        tk.Label(win, textvariable=feedback, bg=THEME["bg"], fg=THEME["green"],
+                 font=FONT_BOLD).pack(pady=(0, 14))
+        if os.name == "nt":
+            self.after(10, lambda: self._dark_title_bar(win))
+
+    def _support_card(self, parent, title, qr_data, subtitle, color, feedback, copies):
+        card = tk.Frame(parent, bg=THEME["card"], padx=16, pady=14)
+        card.pack(side="left", padx=6, anchor="n")
+        tk.Label(card, text=title, bg=THEME["card"], fg=color, font=FONT_BIG_BOLD).pack()
+        self._qr_canvas(card, qr_data).pack(pady=10)
+        tk.Label(card, text=subtitle, bg=THEME["card"], fg=THEME["muted"], font=FONT_SMALL).pack()
+        for label, text in copies:
+            self._button(card, label, lambda t=text, lb=label: self._copy(t, lb, feedback),
+                         THEME["field"], THEME["border"], fg=color).pack(fill="x", pady=(6, 0))
+
+    def _qr_canvas(self, parent, data, size=220):
+        if qrcode is None:
+            return tk.Label(parent, text="(QR Code indisponível:\nrode o iniciar.bat de novo)",
+                            bg=THEME["card"], fg=THEME["muted"], font=FONT_SMALL)
+        qr = qrcode.QRCode(border=3, error_correction=qrcode.constants.ERROR_CORRECT_M)
+        qr.add_data(data)
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+        cell = max(2, size // len(matrix))
+        side = cell * len(matrix)
+        canvas = tk.Canvas(parent, width=side, height=side, bg="white", highlightthickness=0)
+        for y, row in enumerate(matrix):
+            for x, dark in enumerate(row):
+                if dark:
+                    canvas.create_rectangle(x * cell, y * cell, (x + 1) * cell, (y + 1) * cell,
+                                            fill="black", outline="")
+        return canvas
+
+    def _copy(self, text, label, feedback):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+        feedback.set(f"✔ Copiado: {label.replace('Copiar ', '')}")
+
     def _paste(self):
         try:
             self.url_var.set(self.clipboard_get().strip())
@@ -669,7 +770,7 @@ class App(tk.Tk):
             tag = "error"
         elif msg.startswith(("Playlist", "Baixando a lista", "Spotify")):
             tag = "info"
-        elif msg.startswith("Cancelado"):
+        elif msg.startswith(("Cancelado", "♥")):
             tag = "cancel"
         else:
             tag = ""
@@ -963,6 +1064,10 @@ class App(tk.Tk):
                     self.status_var.set(data[0])
                     self._log(data[0])
                     self._set_running(False)
+                    if not failed and not self.support_hint_shown:  # uma vez por sessão
+                        self.support_hint_shown = True
+                        self._log("♥ O programa te ajudou? Apoie com um Pix de qualquer valor "
+                                  "no botão Apoiar. Obrigado!")
         except queue.Empty:
             pass
         self.after(100, self._poll_events)

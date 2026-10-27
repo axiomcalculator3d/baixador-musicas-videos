@@ -101,3 +101,18 @@ Vídeos\
 
 Baixe apenas conteúdo que você tem direito de baixar (seu, de domínio público, licenciado
 ou permitido pelo autor) e respeite os termos de uso de cada site.
+
+## ♥ Apoie o projeto
+
+Se o programa te ajudou, considere uma contribuição de qualquer valor — no programa, é o botão
+**♥ Apoiar**. Obrigado!
+
+**Pix** — chave (celular): `+5538988235328`
+
+<img src="apoio-pix.png" alt="QR Code Pix" width="220">
+
+Pix copia e cola:
+
+```
+00020126540014br.gov.bcb.pix0114+55389882353280214Apoio Baixador5204000053039865802BR5917FRANCISLEY CAMPOS6006BRASIL62070503***63049B81
+```
