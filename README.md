@@ -1,5 +1,7 @@
 # Baixador de Músicas e Vídeos
 
+![Tela do programa](tela.png)
+
 Programa simples para Windows: cole um link, escolha **vídeo** ou **música** e a **qualidade**, e clique em **Baixar**.
 Se o link for de uma **playlist**, ele baixa todos os itens para uma pasta com o nome da playlist, numerados na ordem.
 
