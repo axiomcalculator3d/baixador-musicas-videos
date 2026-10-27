@@ -405,6 +405,60 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir):
     return opts
 
 
+YOUTUBE_LINK = re.compile(r"(^ytsearch|youtube\.com/|youtu\.be/)", re.IGNORECASE)
+
+
+def is_youtube(url):
+    return bool(YOUTUBE_LINK.search(url or ""))
+
+
+class YouTubePacer:
+    """Mantém os downloads do YouTube abaixo do limite que ele aplica sem login.
+
+    O YouTube bloqueia por até 1 hora quem passa de ~300 vídeos por hora. Aqui cada vídeo
+    iniciado é anotado (num arquivo, para valer mesmo fechando o programa) e, perto do limite,
+    o download espera o vídeo mais antigo sair da janela de 1 hora antes de começar.
+    """
+
+    LIMIT = 250  # um pouco abaixo dos ~300, por segurança
+    WINDOW = 3600
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        try:
+            self.starts = [float(t) for t in json.loads(path.read_text(encoding="utf-8"))]
+        except (OSError, ValueError, TypeError):
+            self.starts = []
+
+    def _recent(self, now):
+        return [t for t in self.starts if t > now - self.WINDOW]
+
+    def used(self):
+        with self.lock:
+            return len(self._recent(time.time()))
+
+    def acquire(self, enabled, check_cancel, on_wait):
+        """Anota um vídeo novo; se `enabled` e o limite estiver cheio, espera a vaga abrir."""
+        while True:
+            with self.lock:
+                now = time.time()
+                self.starts = self._recent(now)
+                if not enabled or len(self.starts) < self.LIMIT:
+                    self.starts.append(now)
+                    try:
+                        self.path.parent.mkdir(parents=True, exist_ok=True)
+                        self.path.write_text(json.dumps(self.starts), encoding="utf-8")
+                    except OSError:
+                        pass
+                    return
+                wait = self.starts[0] + self.WINDOW - now
+            on_wait(wait)
+            for _ in range(int(min(wait, 5) * 10) + 1):  # acorda a cada 0,1 s para poder cancelar
+                check_cancel()
+                time.sleep(0.1)
+
+
 def path_key(path):
     """Mesmo arquivo = mesma chave, independente de maiúsculas e barras (Windows)."""
     return os.path.normcase(os.path.abspath(path))
@@ -509,8 +563,8 @@ class App(tk.Tk):
         self.config_data = load_config()
         set_language(self.config_data.get("language") or system_language())
         self.title(tr("app_title"))
-        self.geometry("780x760")
-        self.minsize(660, 640)
+        self.geometry("780x790")
+        self.minsize(660, 670)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -523,6 +577,7 @@ class App(tk.Tk):
         self.support_hint_shown = False
         self.log_history = []  # (texto, cor) — para refazer o registro ao trocar de idioma
         self.ffmpeg_dir = find_ffmpeg()
+        self.pacer = YouTubePacer(DATA_DIR / "youtube_recentes.json")
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=self.config_data.get("mode", "video"))
@@ -531,6 +586,7 @@ class App(tk.Tk):
         self.folder_var = tk.StringVar(value=self.config_data.get("folder", str(DEFAULT_FOLDER)))
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
+        self.pacing_var = tk.BooleanVar(value=self.config_data.get("pacing", True))
         self.status_var = tk.StringVar(value=tr("status_ready"))
         self.hint_var = tk.StringVar()
 
@@ -734,6 +790,11 @@ class App(tk.Tk):
                  font=FONT).pack(side="left")
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
+        tk.Checkbutton(card, text=tr("pacing_option"), variable=self.pacing_var,
+                       bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
+                       activebackground=THEME["card"], activeforeground=THEME["fg"],
+                       highlightthickness=0, bd=0, font=FONT, cursor="hand2").grid(
+            row=7, column=0, sticky="w", pady=(6, 0))
 
         actions = tk.Frame(body, bg=THEME["bg"])
         actions.pack(fill="x", pady=(14, 10))
@@ -934,8 +995,10 @@ class App(tk.Tk):
 
         mode, quality = self.mode_var.get(), self._quality_id()
         workers = max(1, min(8, self.workers_var.get()))
+        pacing = self.pacing_var.get()
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
-                                 "workers": workers, "language": current_language()})
+                                 "workers": workers, "language": current_language(),
+                                 "pacing": pacing})
         save_config(self.config_data)
 
         opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir)
@@ -948,7 +1011,8 @@ class App(tk.Tk):
         self._log(f"\n=== {url} ({self.quality_var.get()}) ===", "head")
 
         self.worker = threading.Thread(
-            target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts, workers), daemon=True)
+            target=self._run, args=(self.run_id, self.cancel_event, url, mode, opts, workers, pacing),
+            daemon=True)
         self.worker.start()
 
     def _cancel(self):
@@ -962,7 +1026,7 @@ class App(tk.Tk):
         self.status_var.set(tr("status_cancelled"))
         self._log(tr("log_cancelled"), "cancel")
 
-    def _run(self, run_id, cancel, url, mode, opts, workers):
+    def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True):
         done, skipped, repeated = [], [], []
         finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
         failures = []  # (posição, nome, motivo) — viram a lista de erros no final
@@ -1038,6 +1102,23 @@ class App(tk.Tk):
                                    when="before_dl")
             return ydl
 
+        pause_logged = []
+
+        def wait_for_youtube(link):
+            """Antes de cada vídeo do YouTube: anota e, perto do limite por hora, espera."""
+            if not is_youtube(link):
+                return
+
+            def on_wait(seconds):
+                minutes, secs = divmod(int(seconds) + 1, 60)
+                text = tr("pacing_wait", time=f"{minutes}:{secs:02d}")
+                emit("progress", overall()[0] if total["n"] > 1 else 0, text)
+                if not pause_logged:
+                    pause_logged.append(True)
+                    emit("log", text, "info")
+
+            self.pacer.acquire(pacing, check_cancel, on_wait)
+
         def fail(index, name, reason):
             failures.append((index, name, reason))
             emit("log", f"✖ {f'#{index}: ' if index else ''}{name} — {reason}", "error")
@@ -1051,6 +1132,7 @@ class App(tk.Tk):
             cancelled, error = False, None
             try:
                 check_cancel()
+                wait_for_youtube(entry.get("url") or entry.get("webpage_url"))
                 with new_ydl() as ydl:
                     target = entry
                     if entry.get("search"):  # veio do Spotify: procura a música no YouTube
@@ -1137,6 +1219,9 @@ class App(tk.Tk):
                 if len(unique) < len(entries):
                     emit("log", tr("repeated_skipped", n=len(entries) - len(unique)), "warn")
                 entries = unique
+                youtube_items = sum(is_youtube(e.get("url") or e.get("webpage_url")) for e in entries)
+                if pacing and self.pacer.used() + youtube_items > YouTubePacer.LIMIT:
+                    emit("log", tr("pacing_big_list"), "info")
                 total["n"] = max(1, len(entries))
                 emit("progress", 0, tr("ready_count", done=0, total=len(entries)) + tr("starting"))
                 if mode == "video" and is_list:
@@ -1166,6 +1251,7 @@ class App(tk.Tk):
                 local.file, local.ok, local.error = None, False, None
                 cancelled, error = False, None
                 try:
+                    wait_for_youtube(url)
                     with main_ydl:
                         main_ydl.process_ie_result(probe, download=True)
                 except DownloadCancelled:

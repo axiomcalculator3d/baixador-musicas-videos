@@ -121,10 +121,13 @@ Vídeos\
   que atualiza o yt-dlp automaticamente.
 - **"FFmpeg não encontrado"**: rode o `iniciar.bat` de novo, ou instale com `winget install Gyan.FFmpeg`.
 - **"O YouTube limitou este computador"**: sem login, o YouTube aceita cerca de 300 vídeos por hora
-  por computador; passando disso, bloqueia por até 1 hora e todo download falha. O programa para de
-  tentar o resto da lista quando isso acontece. Espere de 30 a 60 minutos e baixe a mesma lista de
-  novo — o que já foi baixado é pulado. Baixar menos itens ao mesmo tempo (ex.: 4) ajuda a não chegar
-  no limite tão rápido.
+  por computador; passando disso, bloqueia por até 1 hora e todo download falha.
+  - Com a opção **"Evitar o bloqueio do YouTube"** (ligada por padrão), o programa conta os vídeos do
+    YouTube da última hora (mesmo fechando e abrindo de novo) e, perto de 250, pausa sozinho e
+    continua quando abre vaga — a tela mostra quanto falta. Listas grandes demoram mais, mas vão até o fim.
+  - Se o bloqueio acontecer mesmo assim (por exemplo, com a opção desligada), o programa para de
+    tentar o resto da lista. Espere de 30 a 60 minutos e baixe a mesma lista de novo — o que já foi
+    baixado é pulado.
 
 ## Uso responsável
 

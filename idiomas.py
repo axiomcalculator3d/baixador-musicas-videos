@@ -114,6 +114,11 @@ TEXTS = {
         "err_ffmpeg": "Falha ao converter o arquivo (FFmpeg)",
         "err_unknown": "Motivo desconhecido",
         "err_ratelimit": "O YouTube limitou este computador por excesso de downloads (até 1 hora)",
+        "pacing_option": "Evitar o bloqueio do YouTube (pausa sozinho perto do limite por hora)",
+        "pacing_wait": "⏳ Pausa para o YouTube não bloquear: continua em {time} "
+                       "(limite de ~300 vídeos por hora)",
+        "pacing_big_list": "Essa lista passa do limite do YouTube por hora: quando chegar perto, "
+                           "o programa pausa e continua sozinho.",
         "sum_postponed": ", {n} não tentado(s) por causa do limite do YouTube",
         "ratelimit_help": "⏸ Sem login, o YouTube aceita cerca de 300 vídeos por hora por computador. "
                           "Espere de 30 a 60 minutos e baixe a mesma lista de novo: o que já foi "
@@ -224,6 +229,11 @@ TEXTS = {
         "err_ffmpeg": "Failed to convert the file (FFmpeg)",
         "err_unknown": "Unknown reason",
         "err_ratelimit": "YouTube rate-limited this computer for too many downloads (up to 1 hour)",
+        "pacing_option": "Avoid YouTube blocking (pauses by itself near the hourly limit)",
+        "pacing_wait": "⏳ Pausing so YouTube won't block: resumes in {time} "
+                       "(limit of ~300 videos per hour)",
+        "pacing_big_list": "This list goes over YouTube's hourly limit: when it gets close, "
+                           "the program pauses and resumes by itself.",
         "sum_postponed": ", {n} not tried because of YouTube's limit",
         "ratelimit_help": "⏸ Without signing in, YouTube allows about 300 videos per hour per computer. "
                           "Wait 30 to 60 minutes and download the same list again: what was already "
@@ -335,6 +345,11 @@ TEXTS = {
         "err_ffmpeg": "Error al convertir el archivo (FFmpeg)",
         "err_unknown": "Motivo desconocido",
         "err_ratelimit": "YouTube limitó este equipo por exceso de descargas (hasta 1 hora)",
+        "pacing_option": "Evitar el bloqueo de YouTube (pausa solo cerca del límite por hora)",
+        "pacing_wait": "⏳ Pausa para que YouTube no bloquee: continúa en {time} "
+                       "(límite de ~300 videos por hora)",
+        "pacing_big_list": "Esta lista supera el límite de YouTube por hora: cuando se acerque, "
+                           "el programa pausa y continúa solo.",
         "sum_postponed": ", {n} sin intentar por el límite de YouTube",
         "ratelimit_help": "⏸ Sin iniciar sesión, YouTube permite unos 300 videos por hora por equipo. "
                           "Espera de 30 a 60 minutos y descarga la misma lista de nuevo: lo que ya se "
