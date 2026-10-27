@@ -45,8 +45,17 @@ TEXTS = {
         "folder_other": "Outros formatos",
         "unknown_artist": "Artista desconhecido",
         "untitled": "Sem título",
-        "ffmpeg_missing": "FFmpeg não encontrado. Rode o iniciar.bat de novo para instalar, "
-                          "senão MP3 e vídeos em alta qualidade não funcionam.",
+        "tools_title": "Componentes necessários",
+        "tools_ask": "Para baixar do YouTube e converter os arquivos, o programa precisa de: "
+                     "{tools}.\n\nInstalar agora pelo instalador oficial do Windows (winget)? "
+                     "É feito uma vez só e pode levar alguns minutos.",
+        "tools_installing": "Instalando {tools}… (pode levar alguns minutos)",
+        "tools_done": "✔ Instalado: {tools}.",
+        "tools_failed": "Não consegui instalar: {tools}. Abra o programa de novo para tentar outra vez.",
+        "tools_skipped": "Sem {tools}, alguns downloads e conversões podem falhar. "
+                         "Abra o programa de novo para instalar.",
+        "tools_no_winget": "Faltam componentes ({tools}) e o instalador do Windows (winget) não foi "
+                           "encontrado. Instale o FFmpeg e o Deno pelos sites oficiais.",
         "invalid_link_title": "Link inválido",
         "invalid_link": "Cole um link que comece com http:// ou https://",
         "quit_title": "Sair",
@@ -141,8 +150,17 @@ TEXTS = {
         "folder_other": "Other formats",
         "unknown_artist": "Unknown artist",
         "untitled": "Untitled",
-        "ffmpeg_missing": "FFmpeg not found. Run iniciar.bat again to install it, "
-                          "otherwise MP3 and high-quality videos won't work.",
+        "tools_title": "Required components",
+        "tools_ask": "To download from YouTube and convert files, the program needs: {tools}.\n\n"
+                     "Install them now with the official Windows installer (winget)? "
+                     "It only happens once and may take a few minutes.",
+        "tools_installing": "Installing {tools}… (this may take a few minutes)",
+        "tools_done": "✔ Installed: {tools}.",
+        "tools_failed": "Couldn't install: {tools}. Open the program again to retry.",
+        "tools_skipped": "Without {tools}, some downloads and conversions may fail. "
+                         "Open the program again to install.",
+        "tools_no_winget": "Components are missing ({tools}) and the Windows installer (winget) "
+                           "wasn't found. Install FFmpeg and Deno from their official websites.",
         "invalid_link_title": "Invalid link",
         "invalid_link": "Paste a link that starts with http:// or https://",
         "quit_title": "Quit",
@@ -237,8 +255,17 @@ TEXTS = {
         "folder_other": "Otros formatos",
         "unknown_artist": "Artista desconocido",
         "untitled": "Sin título",
-        "ffmpeg_missing": "FFmpeg no encontrado. Ejecuta iniciar.bat de nuevo para instalarlo; "
-                          "si no, los MP3 y los videos en alta calidad no funcionarán.",
+        "tools_title": "Componentes necesarios",
+        "tools_ask": "Para descargar de YouTube y convertir los archivos, el programa necesita: "
+                     "{tools}.\n\n¿Instalarlos ahora con el instalador oficial de Windows (winget)? "
+                     "Se hace una sola vez y puede tardar unos minutos.",
+        "tools_installing": "Instalando {tools}… (puede tardar unos minutos)",
+        "tools_done": "✔ Instalado: {tools}.",
+        "tools_failed": "No pude instalar: {tools}. Abre el programa de nuevo para reintentar.",
+        "tools_skipped": "Sin {tools}, algunas descargas y conversiones pueden fallar. "
+                         "Abre el programa de nuevo para instalar.",
+        "tools_no_winget": "Faltan componentes ({tools}) y no se encontró el instalador de Windows "
+                           "(winget). Instala FFmpeg y Deno desde sus sitios oficiales.",
         "invalid_link_title": "Enlace no válido",
         "invalid_link": "Pega un enlace que empiece con http:// o https://",
         "quit_title": "Salir",

@@ -9,6 +9,21 @@ Funciona com YouTube, YouTube Music, SoundCloud, Vimeo, Instagram, TikTok, X/Twi
 [centenas de outros sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) (usa o [yt-dlp](https://github.com/yt-dlp/yt-dlp) por baixo).
 Não funciona com serviços protegidos contra cópia (DRM), como Netflix, Disney+ e o áudio do Spotify/Deezer.
 
+## Executável (Baixador.exe)
+
+Também dá para usar como **um arquivo só**, sem Python e sem `iniciar.bat`:
+
+1. Rode o `iniciar.bat` uma vez (prepara o ambiente) e depois o **`compilar.bat`**.
+2. O programa fica em `dist\Baixador.exe` (cerca de 23 MB). Copie para onde quiser e abra com dois cliques.
+
+- Na primeira vez, se faltar **FFmpeg** (conversão/MP3) ou **Deno** (exigido pelo YouTube), o
+  programa pergunta se pode instalar pelo instalador oficial do Windows (winget). É uma vez só.
+- No `.exe` as configurações ficam em `%LOCALAPPDATA%\Baixador`.
+- O `.exe` não atualiza o yt-dlp sozinho: se algum site parar de funcionar, rode o
+  `compilar.bat` de novo para gerar um `.exe` com a versão mais nova.
+- O Windows pode avisar "O Windows protegeu o computador" (o programa não tem assinatura
+  digital): clique em **Mais informações → Executar assim mesmo**.
+
 ## Idiomas / Languages / Idiomas
 
 O programa está em **Português**, **English** e **Español**. Na primeira vez ele segue o idioma

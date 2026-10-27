@@ -38,13 +38,31 @@ from yt_dlp.utils import DownloadCancelled
 
 from idiomas import LANGUAGES, current_language, set_language, system_language, tr
 
+FROZEN = getattr(sys, "frozen", False)  # rodando como Baixador.exe (PyInstaller)
 APP_DIR = Path(__file__).resolve().parent
-CONFIG_FILE = APP_DIR / "config.json"
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))  # arquivos embutidos no .exe (ícone)
+# No .exe as configurações vão para %LOCALAPPDATA%\Baixador: a pasta do .exe pode não aceitar escrita.
+DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "Baixador" if FROZEN else APP_DIR
+CONFIG_FILE = DATA_DIR / "config.json"
 DEFAULT_FOLDER = Path.home() / "Downloads" / "Baixador"
+WINGET_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet"
+# Programas externos que o yt-dlp usa, e o pacote do winget que instala cada um.
+REQUIRED_TOOLS = {"FFmpeg": "Gyan.FFmpeg.Essentials", "Deno": "DenoLand.Deno"}
 
-# Ferramentas instaladas no venv (ex.: deno) precisam estar no PATH para o yt-dlp achar.
-_scripts = Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin")
-os.environ["PATH"] = str(_scripts) + os.pathsep + os.environ.get("PATH", "")
+
+def add_tools_to_path():
+    """Coloca no PATH deste processo o deno do venv e o que o winget instalou.
+
+    O winget só atualiza o PATH de programas abertos depois da instalação.
+    """
+    folders = [Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin"), WINGET_DIR / "Links"]
+    folders += [exe.parent for exe in (WINGET_DIR / "Packages").glob("DenoLand.Deno*/**/deno.exe")]
+    known = os.environ.get("PATH", "").split(os.pathsep)
+    extra = [str(f) for f in folders if f.is_dir() and str(f) not in known]
+    os.environ["PATH"] = os.pathsep.join(extra + known)
+
+
+add_tools_to_path()
 
 # código da qualidade -> altura máxima do vídeo (None = a maior que houver)
 VIDEO_QUALITIES = {
@@ -301,6 +319,25 @@ def find_ffmpeg():
     return None
 
 
+def missing_tools():
+    missing = []
+    if not find_ffmpeg():
+        missing.append("FFmpeg")
+    if not shutil.which("deno"):
+        missing.append("Deno")
+    return missing
+
+
+def install_tools(names):
+    """Instala pelo winget (instalador oficial do Windows). Devolve o que continuou faltando."""
+    for name in names:
+        subprocess.run(["winget", "install", "-e", "--id", REQUIRED_TOOLS[name], "--silent",
+                        "--accept-package-agreements", "--accept-source-agreements"],
+                       capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    add_tools_to_path()
+    return missing_tools()
+
+
 def load_config():
     try:
         return json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
@@ -310,6 +347,7 @@ def load_config():
 
 def save_config(data):
     try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
@@ -472,6 +510,7 @@ class App(tk.Tk):
         self.cancel_event = threading.Event()
         self.worker = None
         self.running = False
+        self.installing = False  # instalando FFmpeg/Deno pelo winget
         self.support_hint_shown = False
         self.log_history = []  # (texto, cor) — para refazer o registro ao trocar de idioma
         self.ffmpeg_dir = find_ffmpeg()
@@ -486,15 +525,36 @@ class App(tk.Tk):
         self.status_var = tk.StringVar(value=tr("status_ready"))
         self.hint_var = tk.StringVar()
 
+        try:
+            self.iconbitmap(default=str(RESOURCE_DIR / "icone.ico"))
+        except tk.TclError:
+            pass
         self._setup_style()
         self._build()
         self._dark_title_bar()
         self._fill_qualities(self._saved_quality(self.mode_var.get()))
         self.after(100, self._poll_events)
+        self.after(400, self._check_tools)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        if not self.ffmpeg_dir:
-            self._log(tr("ffmpeg_missing"), "error")
+    def _check_tools(self):
+        """Na primeira vez (principalmente no .exe), oferece instalar FFmpeg e Deno se faltarem."""
+        missing = missing_tools()
+        if not missing:
+            return
+        tools = ", ".join(missing)
+        if not shutil.which("winget"):
+            self._log(tr("tools_no_winget", tools=tools), "error")
+            return
+        if not messagebox.askyesno(tr("tools_title"), tr("tools_ask", tools=tools)):
+            self._log(tr("tools_skipped", tools=tools), "warn")
+            return
+        self.installing = True
+        self._set_enabled(self.download_btn, False)
+        self.status_var.set(tr("tools_installing", tools=tools))
+        self._log(tr("tools_installing", tools=tools), "info")
+        threading.Thread(target=lambda: self.events.put((None, "tools_done", missing, install_tools(missing))),
+                         daemon=True).start()
 
     def _setup_style(self):
         self.configure(bg=THEME["bg"])
@@ -717,6 +777,8 @@ class App(tk.Tk):
         self._build()
         self._fill_qualities(quality)
         self._set_running(self.running)
+        if self.installing:
+            self._set_enabled(self.download_btn, False)
         self.progress.configure(style=progress_style)
         self.progress["value"] = progress_value
         if was_ready:
@@ -852,7 +914,7 @@ class App(tk.Tk):
         self._set_enabled(self.cancel_btn, running)
 
     def _start(self):
-        if self.running:
+        if self.running or self.installing:
             return
         url = self.url_var.get().strip()
         if not url.startswith(("http://", "https://")):
@@ -1119,6 +1181,9 @@ class App(tk.Tk):
         try:
             while True:
                 run_id, kind, *data = self.events.get_nowait()
+                if kind == "tools_done":
+                    self._tools_done(*data)
+                    continue
                 if run_id != self.run_id:
                     continue  # evento de um download já cancelado
                 if kind == "log":
@@ -1140,6 +1205,17 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         self.after(100, self._poll_events)
+
+    def _tools_done(self, wanted, still_missing):
+        self.installing = False
+        self.ffmpeg_dir = find_ffmpeg()
+        self._set_enabled(self.download_btn, not self.running)
+        installed = [t for t in wanted if t not in still_missing]
+        if installed:
+            self._log(tr("tools_done", tools=", ".join(installed)), "ok")
+        if still_missing:
+            self._log(tr("tools_failed", tools=", ".join(still_missing)), "error")
+        self.status_var.set(tr("status_ready"))
 
     def _on_close(self):
         if self.running:
