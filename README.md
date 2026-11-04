@@ -108,6 +108,9 @@ Vídeos\
     001 - Primeiro vídeo.mp4
 ```
 
+- Prefere tudo junto? Desmarque **"Separar as músicas em pastas por artista"**: uma música avulsa
+  vai direto para `Músicas\Artista - Música.mp3`, e uma playlist fica inteira numa pasta só,
+  com o nome dela (`Músicas\<Playlist>\Artista - Música.mp3`).
 - O artista vem dos dados da música (YouTube Music, SoundCloud…), do título no formato
   `Artista - Música` ou, se não tiver, do nome do canal. Partes como "(Official Video)",
   "[Clipe Oficial]" e "(Lyrics)" saem do nome do arquivo; "feat." sai do nome da pasta,

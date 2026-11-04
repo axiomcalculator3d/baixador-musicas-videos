@@ -113,6 +113,9 @@ TEXTS = {
         "err_network": "Problema de conexão com a internet",
         "err_ffmpeg": "Falha ao converter o arquivo (FFmpeg)",
         "err_unknown": "Motivo desconhecido",
+        "by_artist_option": "Separar as músicas em pastas por artista",
+        "hint_flat": "{fmt} vão para {folder}\\ como \"Artista - Música\"; uma playlist fica toda "
+                     "numa pasta só, com o nome dela.",
         "mode_images": "▣  Imagens",
         "q_original": "Original (como está no site)",
         "folder_images": "Imagens",
@@ -247,6 +250,9 @@ TEXTS = {
         "err_network": "Internet connection problem",
         "err_ffmpeg": "Failed to convert the file (FFmpeg)",
         "err_unknown": "Unknown reason",
+        "by_artist_option": "Sort songs into folders by artist",
+        "hint_flat": "{fmt} files go to {folder}\\ as \"Artist - Song\"; a playlist stays in a single "
+                     "folder named after it.",
         "mode_images": "▣  Images",
         "q_original": "Original (as on the site)",
         "folder_images": "Images",
@@ -382,6 +388,9 @@ TEXTS = {
         "err_network": "Problema de conexión a internet",
         "err_ffmpeg": "Error al convertir el archivo (FFmpeg)",
         "err_unknown": "Motivo desconocido",
+        "by_artist_option": "Separar las canciones en carpetas por artista",
+        "hint_flat": "Los {fmt} van a {folder}\\ como \"Artista - Canción\"; una lista queda toda "
+                     "en una sola carpeta con su nombre.",
         "mode_images": "▣  Imágenes",
         "q_original": "Original (como está en el sitio)",
         "folder_images": "Imágenes",

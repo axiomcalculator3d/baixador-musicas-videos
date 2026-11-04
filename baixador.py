@@ -173,8 +173,14 @@ def output_templates():
     return {
         "video": f"{videos}/%(title).150B.%(ext)s",
         "video_playlist": f"{videos}/%(playlist_title).80B/%(playlist_index)03d - %(title).150B.%(ext)s",
+        # Separando por artista: Músicas/<Artista>/<Música>.mp3
         "mp3": f"{music}/%(pasta_artista).80B/%(musica).150B.%(ext)s",
         "other": f"{other}/%(pasta_artista).80B/%(musica).150B.%(ext)s",
+        # Sem separar: música avulsa direto na pasta; playlist toda numa pasta com o nome dela.
+        "mp3_flat": f"{music}/%(pasta_artista).80B - %(musica).150B.%(ext)s",
+        "other_flat": f"{other}/%(pasta_artista).80B - %(musica).150B.%(ext)s",
+        "mp3_playlist": f"{music}/%(playlist_title).80B/%(pasta_artista).80B - %(musica).150B.%(ext)s",
+        "other_playlist": f"{other}/%(playlist_title).80B/%(pasta_artista).80B - %(musica).150B.%(ext)s",
     }
 
 
@@ -437,7 +443,9 @@ def save_config(data):
         pass
 
 
-def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated=False):
+def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated=False, by_artist=True):
+    """Opções do yt-dlp. "playlist_outtmpl" (nosso, o yt-dlp ignora) é o nome usado quando o
+    link é uma playlist; None mantém o mesmo nome de um item avulso."""
     templates = output_templates()
     opts = {
         # pl_thumbnail vazio: não salva a capa da playlist como arquivo solto.
@@ -467,11 +475,14 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated
         # Prefere a maior resolução até o limite escolhido, e MP4/M4A para tocar em qualquer lugar.
         opts["format_sort"] = [f"res:{height}" if height else "res", "vcodec:h264", "ext:mp4:m4a"]
         opts["merge_output_format"] = "mp4"
+        opts["playlist_outtmpl"] = templates["video_playlist"]
     else:
         codec, kbps = AUDIO_QUALITIES[quality]
         # final_ext faz o yt-dlp pular músicas que já estão na pasta, sem baixar de novo.
         opts["final_ext"] = AUDIO_EXT.get(codec, codec)
-        opts["outtmpl"]["default"] = templates["mp3" if codec == "mp3" else "other"]
+        kind = "mp3" if codec == "mp3" else "other"
+        opts["outtmpl"]["default"] = templates[kind if by_artist else f"{kind}_flat"]
+        opts["playlist_outtmpl"] = None if by_artist else templates[f"{kind}_playlist"]
         # M4A e OPUS: pega o áudio que já vem nesse formato, assim não precisa converter.
         opts["format"] = {"m4a": "ba[ext=m4a]/ba/b", "opus": "ba[acodec=opus]/ba/b"}.get(codec, "ba/b")
         opts["postprocessors"] = [
@@ -644,8 +655,8 @@ class App(tk.Tk):
         self.config_data = load_config()
         set_language(self.config_data.get("language") or system_language())
         self.title(tr("app_title"))
-        self.geometry("800x820")
-        self.minsize(700, 700)
+        self.geometry("800x850")
+        self.minsize(700, 730)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -668,6 +679,7 @@ class App(tk.Tk):
         self.playlist_var = tk.BooleanVar(value=True)
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
         self.pacing_var = tk.BooleanVar(value=self.config_data.get("pacing", True))
+        self.by_artist_var = tk.BooleanVar(value=self.config_data.get("by_artist", True))
         self.aria2_var = tk.BooleanVar(value=self.config_data.get("aria2", False)
                                        and bool(shutil.which("aria2c")))
         self.status_var = tk.StringVar(value=tr("status_ready"))
@@ -875,7 +887,8 @@ class App(tk.Tk):
         ttk.Spinbox(playlist_row, from_=1, to=8, width=3, textvariable=self.workers_var,
                     state="readonly", font=FONT).pack(side="left", padx=6)
         for row, (text, var, command) in enumerate(
-                ((tr("pacing_option"), self.pacing_var, None),
+                ((tr("by_artist_option"), self.by_artist_var, self._update_hint),
+                 (tr("pacing_option"), self.pacing_var, None),
                  (tr("aria2_option"), self.aria2_var, self._on_aria2_toggle)), start=7):
             tk.Checkbutton(card, text=text, variable=var, command=command,
                            bg=THEME["card"], fg=THEME["fg"], selectcolor=THEME["field"],
@@ -972,6 +985,9 @@ class App(tk.Tk):
             hint = tr("hint_images", images=tr("folder_images"))
         elif self.mode_var.get() == "video":
             hint = tr("hint_video", videos=tr("folder_videos"))
+        elif not self.by_artist_var.get():
+            folder = tr("folder_music") if quality.startswith("mp3") else tr("folder_other")
+            hint = tr("hint_flat", fmt=self.quality_var.get().split(" ")[0], folder=folder)
         elif quality.startswith("mp3"):
             hint = tr("hint_mp3", music=tr("folder_music"))
         else:
@@ -1108,7 +1124,8 @@ class App(tk.Tk):
         pacing, accelerated = self.pacing_var.get(), self.aria2_var.get()
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
                                  "workers": workers, "language": current_language(),
-                                 "pacing": pacing, "aria2": accelerated})
+                                 "pacing": pacing, "aria2": accelerated,
+                                 "by_artist": self.by_artist_var.get()})
         save_config(self.config_data)
 
         self.run_id += 1
@@ -1125,7 +1142,7 @@ class App(tk.Tk):
             if accelerated:
                 self._log(tr("aria2_note"), "info")
             opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir,
-                                 accelerated)
+                                 accelerated, self.by_artist_var.get())
             target, args = self._run, (self.run_id, self.cancel_event, url, mode, opts, workers, pacing)
         self.worker = threading.Thread(target=target, args=args, daemon=True)
         self.worker.start()
@@ -1404,9 +1421,8 @@ class App(tk.Tk):
                     emit("log", tr("pacing_big_list"), "info")
                 total["n"] = max(1, len(entries))
                 emit("progress", 0, tr("ready_count", done=0, total=len(entries)) + tr("starting"))
-                if mode == "video" and is_list:
-                    opts = dict(opts, outtmpl={**opts["outtmpl"],
-                                               "default": output_templates()["video_playlist"]})
+                if is_list and opts.get("playlist_outtmpl"):
+                    opts = dict(opts, outtmpl={**opts["outtmpl"], "default": opts["playlist_outtmpl"]})
                 list_info = {"playlist": title, "playlist_title": title,
                              "n_entries": len(entries), "playlist_count": len(entries)}
                 with ThreadPoolExecutor(max_workers=workers) as pool:
