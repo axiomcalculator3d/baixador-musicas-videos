@@ -2,6 +2,11 @@
 
 ![Tela do programa](tela.png)
 
+### ⬇ [Baixar o Baixador.exe](https://github.com/axiomcalculator3d/baixador-musicas-videos/releases/latest/download/Baixador.exe)
+
+Um arquivo só (~25 MB), para Windows: baixe e abra com dois cliques, sem instalar nada.
+Veja as novidades de cada versão em [Releases](https://github.com/axiomcalculator3d/baixador-musicas-videos/releases).
+
 Programa simples para Windows: cole um link, escolha **vídeo** ou **música** e a **qualidade**, e clique em **Baixar**.
 Se o link for de uma **playlist**, ele baixa todos os itens.
 
