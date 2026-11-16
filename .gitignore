@@ -5,3 +5,4 @@ build/
 dist/
 *.spec
 youtube_recentes.json
+baixados.json

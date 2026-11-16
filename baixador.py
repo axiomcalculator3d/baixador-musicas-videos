@@ -275,13 +275,15 @@ def read_spotify(url, ydl):
 # Mensagens do yt-dlp (em inglês) -> explicação curta para a lista de erros. A ordem importa:
 # o bloqueio por excesso de downloads também começa com "Video unavailable".
 _ERROR_HINTS = [
+    (r"No space left|Errno 28|aria2c exited with code 9\b", "err_disk"),
     (r"try again later|rate-limited", "err_ratelimit"),
     (r"Private video|video is private", "err_private"),
     (r"members?[- ]only|Join this channel", "err_members"),
     (r"confirm your age|age[- ]restricted|inappropriate for some users", "err_age"),
     (r"not a bot", "err_bot"),
     (r"not available in your country|geo[- ]?restrict", "err_geo"),
-    (r"Video unavailable|This video is unavailable|has been removed|terminated", "err_unavailable"),
+    (r"Video unavailable|This video is (unavailable|not available)|has been removed|terminated|"
+     r"copyright", "err_unavailable"),
     (r"Requested format is not available", "err_format"),
     (r"HTTP Error 403", "err_403"),
     (r"HTTP Error 404", "err_404"),
@@ -292,6 +294,17 @@ _ERROR_HINTS = [
     (r"ffmpeg|ffprobe|Postprocessing|Conversion failed", "err_ffmpeg"),
     (r"no video formats|no video (could be )?found|there is no video|no media found", "err_no_video"),
 ]
+
+
+# Erros que fazem todo o resto da lista falhar também: em vez de tentar item por item,
+# a lista para e o que faltou fica para depois.
+STOP_KINDS = {"err_disk", "err_ratelimit", "err_429", "err_bot"}
+# Erros em que vale procurar outra versão da mesma música (o vídeo original não serve).
+FALLBACK_KINDS = {"err_unavailable", "err_private", "err_geo", "err_members"}
+# Versões alteradas que não devem substituir a original, a não ser que o original também seja.
+_VARIANT = re.compile(r"\b(432 ?hz|8d|nightcore|slowed|sped ?up|reverb|bass ?boost(ed)?|cover|"
+                      r"karaok[eê]|instrumental|remix|live|ao vivo)\b", re.IGNORECASE)
+MIN_FREE_SPACE = 500 * 1024 * 1024  # abaixo disso a lista para antes de o disco encher de vez
 
 
 def error_kind(msg):
@@ -443,7 +456,8 @@ def save_config(data):
         pass
 
 
-def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated=False, by_artist=True):
+def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated=False, by_artist=True,
+                  pacing=False):
     """Opções do yt-dlp. "playlist_outtmpl" (nosso, o yt-dlp ignora) é o nome usado quando o
     link é uma playlist; None mantém o mesmo nome de um item avulso."""
     templates = output_templates()
@@ -464,6 +478,12 @@ def build_options(mode, quality, folder, whole_playlist, ffmpeg_dir, accelerated
     }
     if ffmpeg_dir:
         opts["ffmpeg_location"] = ffmpeg_dir
+    if pacing:
+        # Pausa curta entre os pedidos ao site (recomendação do próprio yt-dlp contra o erro 429):
+        # com vários downloads juntos, rajadas de pedidos fazem o YouTube bloquear.
+        opts["sleep_interval_requests"] = 0.75
+    # Para pular o que já foi baixado sem consultar o site (ver DownloadIndex).
+    opts["index_tag"] = f"{mode}|{quality}|{by_artist}|{folder}"
     if accelerated and shutil.which("aria2c"):
         # aria2 baixa cada arquivo por várias conexões ao mesmo tempo. Em vídeos fragmentados
         # (HLS/DASH) o yt-dlp continua usando o próprio downloader.
@@ -510,7 +530,7 @@ class YouTubePacer:
     o download espera o vídeo mais antigo sair da janela de 1 hora antes de começar.
     """
 
-    LIMIT = 250  # um pouco abaixo dos ~300, por segurança
+    LIMIT = 200  # bem abaixo dos ~300: com vários downloads juntos o YouTube bloqueia antes
     WINDOW = 3600
 
     def __init__(self, path):
@@ -565,9 +585,10 @@ class ClaimTarget(PostProcessor):
     (Clipe)" e "Música (Letra)"), o segundo é marcado como repetido em vez de "já existia".
     """
 
-    def __init__(self, claimed, lock, final_ext, on_claim=None):
+    def __init__(self, claimed, lock, final_ext, on_claim=None, ffmpeg_dir=None, on_broken=None):
         super().__init__()
         self.claimed, self.lock, self.final_ext, self.on_claim = claimed, lock, final_ext, on_claim
+        self.ffmpeg_dir, self.on_broken = ffmpeg_dir, on_broken
 
     def run(self, info):
         path = Path(info.get("_filename") or info.get("filepath") or "")
@@ -580,7 +601,67 @@ class ClaimTarget(PostProcessor):
             if key in self.claimed:
                 raise AlreadyInThisRun(path.name)
             self.claimed.add(key)
+        # Um arquivo quebrado (ex.: disco cheio no meio da conversão) faria o yt-dlp achar que
+        # a música "já existia" e depois falhar ao mexer nele: apaga para baixar de novo.
+        if path.is_file() and is_broken_media(path, self.ffmpeg_dir):
+            try:
+                path.unlink()
+                if self.on_broken:
+                    self.on_broken(path.name)
+            except OSError:
+                pass
         return [], info
+
+
+def is_broken_media(path, ffmpeg_dir):
+    """Arquivo vazio, ou que o ffprobe não consegue ler a duração."""
+    try:
+        if path.stat().st_size < 1024:
+            return True
+    except OSError:
+        return False
+    probe = Path(ffmpeg_dir or "") / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+    if not probe.is_file():
+        return False
+    result = subprocess.run([str(probe), "-v", "error", "-show_entries", "format=duration",
+                             "-of", "csv=p=0", str(path)], capture_output=True, text=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        return result.returncode != 0 or float(result.stdout.strip() or 0) <= 0
+    except ValueError:
+        return True
+
+
+class DownloadIndex:
+    """Lembra onde cada vídeo já foi salvo, para pular sem nem perguntar ao YouTube.
+
+    Baixar a mesma playlist de novo não gasta o limite por hora com músicas que já estão na
+    pasta. Só pula se o arquivo ainda existir: apagou, baixa de novo.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        try:
+            self.items = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.items = {}
+
+    def existing(self, key):
+        saved = self.items.get(key)
+        try:
+            return saved if saved and Path(saved).stat().st_size >= 1024 else None
+        except OSError:
+            return None
+
+    def add(self, key, file_path):
+        with self.lock:
+            self.items[key] = str(file_path)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text(json.dumps(self.items, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
 
 
 def remove_partial_files(final_path, since):
@@ -655,8 +736,8 @@ class App(tk.Tk):
         self.config_data = load_config()
         set_language(self.config_data.get("language") or system_language())
         self.title(tr("app_title"))
-        self.geometry("800x850")
-        self.minsize(700, 730)
+        self.geometry("800x880")
+        self.minsize(700, 760)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -670,6 +751,7 @@ class App(tk.Tk):
         self.log_history = []  # (texto, cor) — para refazer o registro ao trocar de idioma
         self.ffmpeg_dir = find_ffmpeg()
         self.pacer = YouTubePacer(DATA_DIR / "youtube_recentes.json")
+        self.index = DownloadIndex(DATA_DIR / "baixados.json")
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=self.config_data.get("mode", "video"))
@@ -680,6 +762,7 @@ class App(tk.Tk):
         self.workers_var = tk.IntVar(value=self.config_data.get("workers", 4))
         self.pacing_var = tk.BooleanVar(value=self.config_data.get("pacing", True))
         self.by_artist_var = tk.BooleanVar(value=self.config_data.get("by_artist", True))
+        self.fallback_var = tk.BooleanVar(value=self.config_data.get("fallback", True))
         self.aria2_var = tk.BooleanVar(value=self.config_data.get("aria2", False)
                                        and bool(shutil.which("aria2c")))
         self.status_var = tk.StringVar(value=tr("status_ready"))
@@ -888,6 +971,7 @@ class App(tk.Tk):
                     state="readonly", font=FONT).pack(side="left", padx=6)
         for row, (text, var, command) in enumerate(
                 ((tr("by_artist_option"), self.by_artist_var, self._update_hint),
+                 (tr("fallback_option"), self.fallback_var, None),
                  (tr("pacing_option"), self.pacing_var, None),
                  (tr("aria2_option"), self.aria2_var, self._on_aria2_toggle)), start=7):
             tk.Checkbutton(card, text=text, variable=var, command=command,
@@ -1125,7 +1209,8 @@ class App(tk.Tk):
         self.config_data.update({"mode": mode, "folder": folder, f"{mode}_quality": quality,
                                  "workers": workers, "language": current_language(),
                                  "pacing": pacing, "aria2": accelerated,
-                                 "by_artist": self.by_artist_var.get()})
+                                 "by_artist": self.by_artist_var.get(),
+                                 "fallback": self.fallback_var.get()})
         save_config(self.config_data)
 
         self.run_id += 1
@@ -1135,15 +1220,25 @@ class App(tk.Tk):
         self.progress["value"] = 0
         self.status_var.set(tr("status_fetching"))
         self._log(f"\n=== {url} ({self.quality_var.get()}) ===", "head")
+        free = shutil.disk_usage(folder).free
+        if free < 2 * 1024 ** 3:
+            self._log(tr("disk_low", free=f"{free / 1024 ** 3:.1f} GB"), "warn")
 
         if mode == "images":
             target, args = self._run_images, (self.run_id, self.cancel_event, url, folder)
         else:
-            if accelerated:
+            # O YouTube recusa várias conexões por arquivo (o aria2 sai com o código 22):
+            # lá o download segue no modo normal, que já é quase tão rápido.
+            if accelerated and (is_youtube(url) or SPOTIFY_LINK.search(url)):
+                accelerated = False
+                if self.aria2_var.get():
+                    self._log(tr("aria2_youtube"), "info")
+            elif accelerated:
                 self._log(tr("aria2_note"), "info")
             opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir,
-                                 accelerated, self.by_artist_var.get())
-            target, args = self._run, (self.run_id, self.cancel_event, url, mode, opts, workers, pacing)
+                                 accelerated, self.by_artist_var.get(), pacing)
+            target, args = self._run, (self.run_id, self.cancel_event, url, mode, opts, workers, pacing,
+                                       self.fallback_var.get())
         self.worker = threading.Thread(target=target, args=args, daemon=True)
         self.worker.start()
 
@@ -1220,20 +1315,26 @@ class App(tk.Tk):
             emit("log", f"✖ {reason}", "error")
             emit("done", tr("failed", reason=reason), True)
 
-    def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True):
-        done, skipped, repeated = [], [], []
+    def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True, fallback=True):
+        done, skipped, repeated, alternatives = [], [], [], []
         finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
         failures = []  # (posição, nome, motivo) — viram a lista de erros no final
         skipped_files = set()  # arquivos (caminho completo) que já estavam na pasta antes
         claimed, claim_lock = set(), threading.Lock()  # arquivos que algum item desta lista já pegou
         # Quando o YouTube limita o computador (até 1 hora), todo pedido seguinte falha também:
         # os itens que ainda não começaram ficam para depois em vez de virar uma lista de erros.
-        rate_limited, postponed = threading.Event(), []
-        # Cada download paralelo guarda aqui o arquivo em que está mexendo, se terminou (ok)
-        # e a última mensagem de erro do yt-dlp.
+        rate_limited, postponed, stop_kind = threading.Event(), [], {}
+        # Cada download paralelo guarda aqui o arquivo em que está mexendo, se terminou (ok),
+        # a última mensagem de erro do yt-dlp e a chave dele na lista do que já foi baixado.
         local = threading.local()
         total = {"n": 1}
         started = time.time()
+        folder = opts["paths"]["home"]
+        index_scope = {"v": ""}  # nome da playlist, quando ela tem pasta própria
+
+        def stop(kind):
+            stop_kind.setdefault("v", kind)
+            rate_limited.set()
 
         def emit(kind, *data):
             self.events.put((run_id, kind, *data))
@@ -1277,6 +1378,8 @@ class App(tk.Tk):
                 name = info.get("musica") or info.get("title", "?")
                 if info.get("pasta_artista"):
                     name = f"{info['pasta_artista']} — {name}"
+                if getattr(local, "index_key", None) and info.get("filepath"):
+                    self.index.add(local.index_key, info["filepath"])
                 if path_key(info.get("filepath") or "") in skipped_files:
                     skipped.append(name)
                     return
@@ -1286,15 +1389,20 @@ class App(tk.Tk):
         def on_error(msg):
             local.error = msg
 
-        def new_ydl():
-            ydl = yt_dlp.YoutubeDL(dict(
-                opts, logger=QueueLogger(emit, on_skip=skipped_files.add, on_error=on_error),
-                progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook]))
+        def new_ydl(plain=False):
+            """plain=True: sem o aria2 (para tentar de novo quando ele falha)."""
+            params = dict(opts, logger=QueueLogger(emit, on_skip=skipped_files.add, on_error=on_error),
+                          progress_hooks=[progress_hook], postprocessor_hooks=[postprocessor_hook])
+            if plain:
+                params.pop("external_downloader", None)
+            ydl = yt_dlp.YoutubeDL(params)
             if mode == "audio":
                 ydl.add_post_processor(ArtistOrganizer(), when="pre_process")
-            ydl.add_post_processor(ClaimTarget(claimed, claim_lock, opts.get("final_ext"),
-                                               on_claim=lambda path: setattr(local, "file", path)),
-                                   when="before_dl")
+            ydl.add_post_processor(ClaimTarget(
+                claimed, claim_lock, opts.get("final_ext"),
+                on_claim=lambda path: setattr(local, "file", path), ffmpeg_dir=self.ffmpeg_dir,
+                on_broken=lambda name: emit("log", tr("broken_redo", name=name), "warn")),
+                when="before_dl")
             return ydl
 
         pause_logged = []
@@ -1318,26 +1426,130 @@ class App(tk.Tk):
             failures.append((index, name, reason))
             emit("log", f"✖ {f'#{index}: ' if index else ''}{name} — {reason}", "error")
 
+        def attempt(target, extra):
+            """Baixa um item, com uma segunda tentativa quando a falha costuma ser passageira:
+            o aria2 recusado pelo site (tenta no modo normal) ou o erro 403 do YouTube."""
+            error, plain = None, False
+            for retry in (False, True):
+                local.file, local.ok, local.error, error = None, False, None, None
+                try:
+                    with new_ydl(plain) as ydl:
+                        ydl.extract_info(target.get("url") or target.get("webpage_url"),
+                                         ie_key=target.get("ie_key"), extra_info=extra)
+                except (AlreadyInThisRun, DownloadCancelled):
+                    raise
+                except Exception as exc:  # noqa: BLE001 — devolvido como texto do erro
+                    error = str(exc)
+                error = local.error or error
+                plain = bool(opts.get("external_downloader") and "aria2c exited" in (error or "")
+                             and error_kind(error) != "err_disk")
+                if local.ok or retry or not (plain or error_kind(error) == "err_403"):
+                    return error
+                name = target.get("title") or "?"
+                emit("log", tr("aria2_retry" if plain else "retry_403", name=name), "warn")
+            return error
+
+        def alternative_candidates(entry, query):
+            """Outras versões da mesma música: primeiro no YouTube, depois no SoundCloud.
+
+            Só aceita versões com duração parecida com a original (evita prévias de 30 s e
+            músicas erradas) e que não sejam versões alteradas (slowed, 8D, cover…), a não
+            ser que a original também seja.
+            """
+            want = entry.get("duration")
+            altered_ok = bool(_VARIANT.search(entry.get("title") or ""))
+            for prefix, source in (("ytsearch5", "YouTube"), ("scsearch5", "SoundCloud")):
+                check_cancel()
+                if source == "YouTube":
+                    wait_for_youtube("ytsearch:")
+                try:
+                    with new_ydl() as ydl:
+                        found = ydl.extract_info(f"{prefix}:{query}", download=False, process=False)
+                        for result in [r for r in (found or {}).get("entries") or [] if r]:
+                            if result.get("id") == entry.get("id"):
+                                continue
+                            if not altered_ok and _VARIANT.search(result.get("title") or ""):
+                                continue
+                            got = result.get("duration")
+                            if got is None and source == "SoundCloud":
+                                got = (ydl.extract_info(result["url"], download=False, process=False)
+                                       or {}).get("duration")
+                            if got is not None and got < 60:
+                                continue
+                            if want and got and abs(got - want) > max(20, want * 0.15):
+                                continue
+                            yield result, source
+                except DownloadCancelled:
+                    raise
+                except Exception:  # noqa: BLE001 — essa fonte não deu; tenta a próxima
+                    continue
+
+        def try_alternatives(index, entry, extra, error):
+            """O vídeo original não serve: baixa outra versão da mesma música (até 2 tentativas)."""
+            title = entry.get("title") or ""
+            if not title or title.startswith("http"):
+                local.no_alt = True
+                return error
+            artist = "" if _SEPARATOR.match(title) else clean_artist(entry.get("channel") or entry.get("uploader"))
+            if artist == tr("unknown_artist"):
+                artist = ""
+            query = f"{artist} - {title}" if artist else title
+            for tries, (candidate, source) in enumerate(alternative_candidates(entry, query)):
+                if tries == 2:
+                    break
+                emit("log", tr("alt_found", index=index, name=title, source=source,
+                               alt=candidate.get("title") or "?"), "info")
+                alt_extra = dict(extra)
+                if artist:  # mantém o nome da música original, não o do vídeo encontrado
+                    alt_extra.update(spotify_artist=artist, spotify_title=title)
+                if source == "YouTube":
+                    wait_for_youtube(candidate.get("url") or "")
+                alt_error = attempt(candidate, alt_extra)
+                if local.ok:
+                    alternatives.append(title)
+                    return None
+                if error_kind(alt_error) in STOP_KINDS:
+                    return alt_error
+            local.no_alt = True
+            return error
+
         def download_entry(index, entry, extra):
+            name = entry.get("title") or entry.get("url") or "?"
+            if not rate_limited.is_set() and shutil.disk_usage(folder).free < MIN_FREE_SPACE:
+                stop("err_disk")
             if rate_limited.is_set():
                 postponed.append(index)
                 finished.append(index)
                 return
-            local.file, local.ok, local.error = None, False, None
+            item_started = time.time()
+            local.file, local.ok, local.no_alt, local.index_key = None, False, False, None
+            if entry.get("id") and opts.get("index_tag"):
+                local.index_key = f"{entry['id']}|{opts['index_tag']}|{index_scope['v']}"
+                saved = self.index.existing(local.index_key)
+                if saved:  # já baixado antes, e o arquivo continua lá: nem consulta o site
+                    skipped.append(name)
+                    finished.append(index)
+                    emit("log", tr("already_existed", name=Path(saved).name), "warn")
+                    if total["n"] > 1:
+                        pct, prefix = overall()
+                        emit("progress", pct, prefix.strip())
+                    return
             cancelled, error = False, None
             try:
                 check_cancel()
                 wait_for_youtube(entry.get("url") or entry.get("webpage_url"))
-                with new_ydl() as ydl:
-                    target = entry
-                    if entry.get("search"):  # veio do Spotify: procura a música no YouTube
+                target = entry
+                if entry.get("search"):  # veio do Spotify: procura a música no YouTube
+                    with new_ydl() as ydl:
                         found = ydl.extract_info(entry["url"], download=False, process=False)
-                        results = [r for r in (found or {}).get("entries") or [] if r]
-                        if not results:
-                            raise LookupError(tr("not_found_youtube"))
-                        target = results[0]
-                    ydl.extract_info(target.get("url") or target.get("webpage_url"),
-                                     ie_key=target.get("ie_key"), extra_info=extra)
+                    results = [r for r in (found or {}).get("entries") or [] if r]
+                    if not results:
+                        raise LookupError(tr("not_found_youtube"))
+                    target = results[0]
+                error = attempt(target, extra)
+                if (not local.ok and fallback and mode == "audio" and not entry.get("search")
+                        and error_kind(error) in FALLBACK_KINDS):
+                    error = try_alternatives(index, entry, extra, error)
             except AlreadyInThisRun as exc:
                 local.ok = True
                 repeated.append(str(exc))
@@ -1350,10 +1562,14 @@ class App(tk.Tk):
             cancelled = cancelled or cancel.is_set()
             finished.append(index)
             if not cancelled and not local.ok:
-                if error_kind(local.error or error) == "err_ratelimit":
-                    rate_limited.set()
-                fail(index, entry.get("title") or entry.get("url") or "?",
-                     explain_error(local.error or error))
+                if error_kind(error) in STOP_KINDS:
+                    stop(error_kind(error))
+                reason = explain_error(error)
+                if local.no_alt and fallback and mode == "audio":
+                    reason += tr("alt_none")
+                fail(index, name, reason)
+                if local.file:  # não deixa pedaços (.part, .webm, capa) desse item na pasta
+                    remove_partial_files(local.file, item_started)
             if not cancelled and total["n"] > 1:
                 pct, prefix = overall()
                 emit("progress", pct, prefix.strip())
@@ -1423,6 +1639,7 @@ class App(tk.Tk):
                 emit("progress", 0, tr("ready_count", done=0, total=len(entries)) + tr("starting"))
                 if is_list and opts.get("playlist_outtmpl"):
                     opts = dict(opts, outtmpl={**opts["outtmpl"], "default": opts["playlist_outtmpl"]})
+                    index_scope["v"] = title  # a mesma música em outra playlist vai para outra pasta
                 list_info = {"playlist": title, "playlist_title": title,
                              "n_entries": len(entries), "playlist_count": len(entries)}
                 with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1433,6 +1650,8 @@ class App(tk.Tk):
                         pool.submit(download_entry, index, entry, extra)
                 check_cancel()
                 summary = tr("sum_done", n=len(done))
+                if alternatives:
+                    summary += tr("sum_alternative", n=len(alternatives))
                 if skipped:
                     summary += tr("sum_skipped", n=len(skipped))
                 if repeated:
@@ -1473,7 +1692,10 @@ class App(tk.Tk):
                 emit("log", tr("errors_header", n=len(failures)), "error")
                 for index, name, reason in sorted(failures, key=lambda f: f[0] or 0):
                     emit("log", f"✖    {index}. {name} — {reason}", "error")
-            if rate_limited.is_set() or any(r == tr("err_ratelimit") for _i, _n, r in failures):
+            kinds = {stop_kind.get("v")} | {k for k in STOP_KINDS for _i, _n, r in failures if r == tr(k)}
+            if "err_disk" in kinds:
+                emit("log", tr("disk_help"), "warn")
+            elif kinds & {"err_ratelimit", "err_429", "err_bot"}:
                 emit("log", tr("ratelimit_help"), "warn")
         except DownloadCancelled:
             pass

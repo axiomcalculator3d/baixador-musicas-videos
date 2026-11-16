@@ -23,9 +23,27 @@ Os arquivos vão para `Imagens\<site>\…`, do jeito que estão no site.
 ## Download acelerado (aria2)
 
 A opção **Download acelerado com aria2** baixa cada arquivo por várias conexões ao mesmo tempo.
-Ajuda principalmente em sites lentos e arquivos grandes; no YouTube o ganho é pequeno
-(num teste, 5,8 → 6,9 MB/s). Na primeira vez que ligar, o programa oferece instalar o aria2 (~5 MB).
-Com ela ligada, a porcentagem de cada arquivo não aparece enquanto baixa.
+Ajuda em sites lentos e arquivos grandes. **No YouTube ela não é usada**: o YouTube recusa várias
+conexões por arquivo (o aria2 sai com "código 22"), então lá o download segue no modo normal.
+Se o aria2 falhar em outro site, o programa tenta de novo no modo normal. Na primeira vez que ligar,
+o programa oferece instalar o aria2 (~5 MB). Com ela ligada, a porcentagem de cada arquivo não aparece.
+
+## Música indisponível: outra versão
+
+Algumas músicas de playlists do YouTube Music são bloqueadas pelo próprio YouTube em todos os
+players ("This video is not available"), ou foram removidas por direitos autorais. Com a opção
+**"Se a música não estiver disponível, procurar outra versão"** (ligada por padrão), o programa
+procura a mesma música em outro vídeo do YouTube e, se não achar, no SoundCloud. Ele só aceita uma
+versão com duração parecida com a original e que não seja alterada (slowed, 8D, cover…, a não ser que
+a original também seja), e salva com o nome da música original. O resumo mostra quantas vieram de
+outra fonte.
+
+## Baixar a mesma lista de novo
+
+O programa lembra o que já baixou: baixando a mesma playlist outra vez, as músicas que já estão na
+pasta são puladas na hora, **sem consultar o YouTube** (não gasta o limite por hora). Se você apagou
+uma música, ela é baixada de novo. Arquivos quebrados na pasta (ex.: de quando o disco encheu) são
+detectados e baixados de novo.
 
 ## Executável (Baixador.exe)
 
@@ -140,6 +158,11 @@ Vídeos\
 
 - **Parou de funcionar num site**: os sites mudam com frequência. Feche e abra pelo `iniciar.bat`,
   que atualiza o yt-dlp automaticamente.
+- **"O disco ficou cheio"**: o programa avisa quando há menos de 2 GB livres e para a lista se o
+  espaço acabar, em vez de gerar uma lista de erros. Libere espaço e baixe a mesma lista de novo.
+- **Erro 403 / 429 / "verificação anti-robô"**: o 403 costuma ser passageiro e o programa tenta de
+  novo sozinho. O 429 e a verificação anti-robô são o YouTube pedindo calma: a lista para, e com a
+  opção "Evitar o bloqueio do YouTube" o programa já espaça os pedidos para isso acontecer menos.
 - **"FFmpeg não encontrado"**: rode o `iniciar.bat` de novo, ou instale com `winget install Gyan.FFmpeg`.
 - **"O YouTube limitou este computador"**: sem login, o YouTube aceita cerca de 300 vídeos por hora
   por computador; passando disso, bloqueia por até 1 hora e todo download falha.

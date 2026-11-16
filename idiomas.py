@@ -135,13 +135,28 @@ TEXTS = {
         "aria2_failed": "Não consegui instalar o aria2; o download continua no modo normal.",
         "aria2_note": "Download acelerado (aria2) ligado: a porcentagem de cada arquivo não aparece "
                       "enquanto ele baixa.",
+        "err_disk": "O disco ficou cheio",
+        "disk_help": "⏸ O disco ficou sem espaço e a lista parou. Libere espaço e baixe a mesma lista "
+                     "de novo: o que já foi baixado é pulado.",
+        "disk_low": "Pouco espaço livre no disco ({free}). Se encher, a lista para sozinha.",
+        "broken_redo": "↻ Arquivo quebrado na pasta, baixando de novo: {name}",
+        "aria2_retry": "↻ O aria2 falhou em \"{name}\"; tentando de novo no modo normal.",
+        "retry_403": "↻ O YouTube recusou \"{name}\" (erro 403, costuma ser passageiro); tentando de novo.",
+        "aria2_youtube": "O download acelerado (aria2) não é usado no YouTube: ele recusa várias "
+                         "conexões por arquivo. Baixando no modo normal.",
+        "fallback_option": "Se a música não estiver disponível, procurar outra versão "
+                           "(YouTube e SoundCloud)",
+        "alt_found": "↻ #{index} {name}: o original não está disponível; baixando outra versão "
+                     "do {source}: {alt}",
+        "alt_none": " (não achei outra versão)",
+        "sum_alternative": ", {n} de outra fonte",
         "err_ratelimit": "O YouTube limitou este computador por excesso de downloads (até 1 hora)",
         "pacing_option": "Evitar o bloqueio do YouTube (pausa sozinho perto do limite por hora)",
         "pacing_wait": "⏳ Pausa para o YouTube não bloquear: continua em {time} "
                        "(limite de ~300 vídeos por hora)",
         "pacing_big_list": "Essa lista passa do limite do YouTube por hora: quando chegar perto, "
                            "o programa pausa e continua sozinho.",
-        "sum_postponed": ", {n} não tentado(s) por causa do limite do YouTube",
+        "sum_postponed": ", {n} ficaram para depois (motivo abaixo)",
         "ratelimit_help": "⏸ Sem login, o YouTube aceita cerca de 300 vídeos por hora por computador. "
                           "Espere de 30 a 60 minutos e baixe a mesma lista de novo: o que já foi "
                           "baixado é pulado e só o que faltou é baixado.",
@@ -272,13 +287,27 @@ TEXTS = {
         "aria2_failed": "Couldn't install aria2; downloads continue in normal mode.",
         "aria2_note": "Faster download (aria2) is on: each file's percentage isn't shown "
                       "while it downloads.",
+        "err_disk": "The disk is full",
+        "disk_help": "⏸ The disk ran out of space and the list stopped. Free up space and download the "
+                     "same list again: what was already downloaded is skipped.",
+        "disk_low": "Low free disk space ({free}). If it fills up, the list stops by itself.",
+        "broken_redo": "↻ Broken file in the folder, downloading again: {name}",
+        "aria2_retry": "↻ aria2 failed on \"{name}\"; retrying in normal mode.",
+        "retry_403": "↻ YouTube refused \"{name}\" (error 403, usually temporary); retrying.",
+        "aria2_youtube": "Faster download (aria2) isn't used on YouTube: it refuses several "
+                         "connections per file. Downloading in normal mode.",
+        "fallback_option": "If a song isn't available, look for another version (YouTube and SoundCloud)",
+        "alt_found": "↻ #{index} {name}: the original isn't available; downloading another version "
+                     "from {source}: {alt}",
+        "alt_none": " (no other version found)",
+        "sum_alternative": ", {n} from another source",
         "err_ratelimit": "YouTube rate-limited this computer for too many downloads (up to 1 hour)",
         "pacing_option": "Avoid YouTube blocking (pauses by itself near the hourly limit)",
         "pacing_wait": "⏳ Pausing so YouTube won't block: resumes in {time} "
                        "(limit of ~300 videos per hour)",
         "pacing_big_list": "This list goes over YouTube's hourly limit: when it gets close, "
                            "the program pauses and resumes by itself.",
-        "sum_postponed": ", {n} not tried because of YouTube's limit",
+        "sum_postponed": ", {n} left for later (reason below)",
         "ratelimit_help": "⏸ Without signing in, YouTube allows about 300 videos per hour per computer. "
                           "Wait 30 to 60 minutes and download the same list again: what was already "
                           "downloaded is skipped and only what's missing is downloaded.",
@@ -410,13 +439,27 @@ TEXTS = {
         "aria2_failed": "No pude instalar aria2; la descarga sigue en modo normal.",
         "aria2_note": "Descarga acelerada (aria2) activada: el porcentaje de cada archivo no se "
                       "muestra mientras se descarga.",
+        "err_disk": "El disco se llenó",
+        "disk_help": "⏸ El disco se quedó sin espacio y la lista se detuvo. Libera espacio y descarga la "
+                     "misma lista de nuevo: lo que ya se descargó se omite.",
+        "disk_low": "Poco espacio libre en el disco ({free}). Si se llena, la lista se detiene sola.",
+        "broken_redo": "↻ Archivo dañado en la carpeta, descargando de nuevo: {name}",
+        "aria2_retry": "↻ aria2 falló en \"{name}\"; reintentando en modo normal.",
+        "retry_403": "↻ YouTube rechazó \"{name}\" (error 403, suele ser pasajero); reintentando.",
+        "aria2_youtube": "La descarga acelerada (aria2) no se usa en YouTube: rechaza varias "
+                         "conexiones por archivo. Descargando en modo normal.",
+        "fallback_option": "Si la canción no está disponible, buscar otra versión (YouTube y SoundCloud)",
+        "alt_found": "↻ #{index} {name}: el original no está disponible; descargando otra versión "
+                     "de {source}: {alt}",
+        "alt_none": " (no encontré otra versión)",
+        "sum_alternative": ", {n} de otra fuente",
         "err_ratelimit": "YouTube limitó este equipo por exceso de descargas (hasta 1 hora)",
         "pacing_option": "Evitar el bloqueo de YouTube (pausa solo cerca del límite por hora)",
         "pacing_wait": "⏳ Pausa para que YouTube no bloquee: continúa en {time} "
                        "(límite de ~300 videos por hora)",
         "pacing_big_list": "Esta lista supera el límite de YouTube por hora: cuando se acerque, "
                            "el programa pausa y continúa solo.",
-        "sum_postponed": ", {n} sin intentar por el límite de YouTube",
+        "sum_postponed": ", {n} quedaron para después (motivo abajo)",
         "ratelimit_help": "⏸ Sin iniciar sesión, YouTube permite unos 300 videos por hora por equipo. "
                           "Espera de 30 a 60 minutos y descarga la misma lista de nuevo: lo que ya se "
                           "descargó se omite y solo se descarga lo que faltó.",
