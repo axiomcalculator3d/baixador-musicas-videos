@@ -28,6 +28,23 @@ conexões por arquivo (o aria2 sai com "código 22"), então lá o download segu
 Se o aria2 falhar em outro site, o programa tenta de novo no modo normal. Na primeira vez que ligar,
 o programa oferece instalar o aria2 (~5 MB). Com ela ligada, a porcentagem de cada arquivo não aparece.
 
+## Fonte das músicas: YouTube ou SoundCloud
+
+Sem login, o YouTube aceita cerca de 300 vídeos por hora por computador. Para listas grandes, o
+formato Música tem a opção **Fonte das músicas**:
+
+| Opção | Como funciona |
+|---|---|
+| **Automático** (padrão) | Baixa do YouTube (melhor qualidade). Se o YouTube bloquear, o resto da lista continua pelo **SoundCloud** na hora, sem esperar. |
+| **Só SoundCloud** | Lê a lista do YouTube/Spotify (1 pedido) e baixa cada música do SoundCloud. O limite do YouTube não se aplica. |
+| **Só YouTube** | Só YouTube; se bloquear, a lista para e o programa explica. |
+
+No SoundCloud o programa procura a mesma música (artista + nome) e só aceita uma versão completa,
+com duração parecida com a original e que não seja alterada (slowed, sped up, 8D, cover, edit,
+versão de 1 hora…). A qualidade lá costuma ficar entre 96 e 160 kbps (no YouTube, ~130–160 kbps);
+num teste com 8 músicas das playlists, o SoundCloud tinha 7. O SoundCloud também tem seus limites,
+mas bem mais folgados.
+
 ## Música indisponível: outra versão
 
 Algumas músicas de playlists do YouTube Music são bloqueadas pelo próprio YouTube em todos os

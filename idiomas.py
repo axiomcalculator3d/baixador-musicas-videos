@@ -150,6 +150,15 @@ TEXTS = {
                      "do {source}: {alt}",
         "alt_none": " (não achei outra versão)",
         "sum_alternative": ", {n} de outra fonte",
+        "sec_source": "FONTE DAS MÚSICAS",
+        "src_auto": "Automático: YouTube; se bloquear, SoundCloud",
+        "src_youtube": "Só YouTube (melhor qualidade)",
+        "src_soundcloud": "Só SoundCloud (sem o limite do YouTube)",
+        "switch_soundcloud": "↻ O YouTube bloqueou: o resto da lista continua pelo SoundCloud, sem "
+                             "esperar (qualidade um pouco menor).",
+        "sc_download": "↻ #{index} {name}: baixando do {source}: {alt}",
+        "sc_none": "Não achei no SoundCloud uma versão completa e original",
+        "sum_soundcloud": ", {n} do SoundCloud",
         "err_ratelimit": "O YouTube limitou este computador por excesso de downloads (até 1 hora)",
         "pacing_option": "Evitar o bloqueio do YouTube (pausa sozinho perto do limite por hora)",
         "pacing_wait": "⏳ Pausa para o YouTube não bloquear: continua em {time} "
@@ -301,6 +310,15 @@ TEXTS = {
                      "from {source}: {alt}",
         "alt_none": " (no other version found)",
         "sum_alternative": ", {n} from another source",
+        "sec_source": "SONG SOURCE",
+        "src_auto": "Automatic: YouTube; if it blocks, SoundCloud",
+        "src_youtube": "YouTube only (best quality)",
+        "src_soundcloud": "SoundCloud only (no YouTube limit)",
+        "switch_soundcloud": "↻ YouTube blocked: the rest of the list continues from SoundCloud, "
+                             "without waiting (slightly lower quality).",
+        "sc_download": "↻ #{index} {name}: downloading from {source}: {alt}",
+        "sc_none": "Couldn't find a complete, original version on SoundCloud",
+        "sum_soundcloud": ", {n} from SoundCloud",
         "err_ratelimit": "YouTube rate-limited this computer for too many downloads (up to 1 hour)",
         "pacing_option": "Avoid YouTube blocking (pauses by itself near the hourly limit)",
         "pacing_wait": "⏳ Pausing so YouTube won't block: resumes in {time} "
@@ -453,6 +471,15 @@ TEXTS = {
                      "de {source}: {alt}",
         "alt_none": " (no encontré otra versión)",
         "sum_alternative": ", {n} de otra fuente",
+        "sec_source": "FUENTE DE LAS CANCIONES",
+        "src_auto": "Automático: YouTube; si bloquea, SoundCloud",
+        "src_youtube": "Solo YouTube (mejor calidad)",
+        "src_soundcloud": "Solo SoundCloud (sin el límite de YouTube)",
+        "switch_soundcloud": "↻ YouTube bloqueó: el resto de la lista sigue por SoundCloud, sin "
+                             "esperar (calidad un poco menor).",
+        "sc_download": "↻ #{index} {name}: descargando de {source}: {alt}",
+        "sc_none": "No encontré en SoundCloud una versión completa y original",
+        "sum_soundcloud": ", {n} de SoundCloud",
         "err_ratelimit": "YouTube limitó este equipo por exceso de descargas (hasta 1 hora)",
         "pacing_option": "Evitar el bloqueo de YouTube (pausa solo cerca del límite por hora)",
         "pacing_wait": "⏳ Pausa para que YouTube no bloquee: continúa en {time} "

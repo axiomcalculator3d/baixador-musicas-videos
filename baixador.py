@@ -299,11 +299,22 @@ _ERROR_HINTS = [
 # Erros que fazem todo o resto da lista falhar também: em vez de tentar item por item,
 # a lista para e o que faltou fica para depois.
 STOP_KINDS = {"err_disk", "err_ratelimit", "err_429", "err_bot"}
+YOUTUBE_BLOCKS = {"err_ratelimit", "err_429", "err_bot"}  # o YouTube pedindo calma
 # Erros em que vale procurar outra versão da mesma música (o vídeo original não serve).
 FALLBACK_KINDS = {"err_unavailable", "err_private", "err_geo", "err_members"}
 # Versões alteradas que não devem substituir a original, a não ser que o original também seja.
-_VARIANT = re.compile(r"\b(432 ?hz|8d|nightcore|slowed|sped ?up|reverb|bass ?boost(ed)?|cover|"
-                      r"karaok[eê]|instrumental|remix|live|ao vivo)\b", re.IGNORECASE)
+_VARIANT = re.compile(r"\b(432 ?hz|8d|nightcore|slowed|sped ?up|speed ?up|reverb|bass ?boost(ed)?|"
+                      r"cover|karaok[eê]|instrumental|remix|live|ao vivo|batida|techno|mashup|bootleg|"
+                      r"accelerat\w*|extended|loop|\d+ ?hours?|(?<!radio )edit)\b", re.IGNORECASE)
+
+
+def is_variant(title):
+    # NFKC transforma letras "estilizadas" (𝐬𝐥𝐨𝐰𝐞𝐝) em letras comuns antes de comparar.
+    return bool(_VARIANT.search(unicodedata.normalize("NFKC", title or "")))
+
+
+# De onde baixar as músicas (formato Música): código -> chave do texto na tela.
+SOURCES = {"auto": "src_auto", "youtube": "src_youtube", "soundcloud": "src_soundcloud"}
 MIN_FREE_SPACE = 500 * 1024 * 1024  # abaixo disso a lista para antes de o disco encher de vez
 
 
@@ -736,8 +747,8 @@ class App(tk.Tk):
         self.config_data = load_config()
         set_language(self.config_data.get("language") or system_language())
         self.title(tr("app_title"))
-        self.geometry("800x880")
-        self.minsize(700, 760)
+        self.geometry("800x920")
+        self.minsize(700, 800)
 
         self.events = queue.Queue()
         # Cada download tem seu próprio id e sinal de cancelamento; eventos de um download
@@ -763,6 +774,8 @@ class App(tk.Tk):
         self.pacing_var = tk.BooleanVar(value=self.config_data.get("pacing", True))
         self.by_artist_var = tk.BooleanVar(value=self.config_data.get("by_artist", True))
         self.fallback_var = tk.BooleanVar(value=self.config_data.get("fallback", True))
+        self.source = self.config_data.get("source") if self.config_data.get("source") in SOURCES else "auto"
+        self.source_var = tk.StringVar()
         self.aria2_var = tk.BooleanVar(value=self.config_data.get("aria2", False)
                                        and bool(shutil.which("aria2c")))
         self.status_var = tk.StringVar(value=tr("status_ready"))
@@ -926,7 +939,7 @@ class App(tk.Tk):
         options_row = tk.Frame(card, bg=THEME["card"])
         options_row.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         format_col = tk.Frame(options_row, bg=THEME["card"])
-        format_col.pack(side="left", padx=(0, 24))
+        format_col.pack(side="left", padx=(0, 24), anchor="n")
         self._section(format_col, tr("sec_format")).pack(anchor="w")
         toggles = tk.Frame(format_col, bg=THEME["card"])
         toggles.pack(anchor="w", pady=(4, 0))
@@ -949,6 +962,15 @@ class App(tk.Tk):
         self.quality_box.pack(anchor="w", fill="x", pady=(4, 0))
         self.quality_box.bind("<<ComboboxSelected>>", lambda _e: self._update_hint())
         self.quality_box.bind("<MouseWheel>", lambda _e: "break")
+        self._section(quality_col, tr("sec_source")).pack(anchor="w", pady=(8, 0))
+        self.source_labels = {tr(key): code for code, key in SOURCES.items()}
+        self.source_var.set(tr(SOURCES[self.source]))
+        self.source_box = ttk.Combobox(quality_col, textvariable=self.source_var, state="readonly",
+                                       values=list(self.source_labels), font=FONT, width=30)
+        self.source_box.pack(anchor="w", fill="x", pady=(4, 0))
+        self.source_box.bind("<<ComboboxSelected>>",
+                             lambda _e: setattr(self, "source", self.source_labels[self.source_var.get()]))
+        self.source_box.bind("<MouseWheel>", lambda _e: "break")
 
         self._section(card, tr("sec_folder")).grid(row=3, column=0, sticky="w")
         folder_row = tk.Frame(card, bg=THEME["card"])
@@ -1054,6 +1076,8 @@ class App(tk.Tk):
         self.quality_ids = {quality_label(q): q for q in options}
         for value, btn in self.mode_buttons.items():
             btn.configure(fg="white" if value == self.mode_var.get() else THEME["muted"])
+        # A fonte das músicas só vale no formato Música.
+        self.source_box.configure(state="readonly" if self.mode_var.get() == "audio" else "disabled")
         self.quality_box["values"] = list(self.quality_ids)
         if selected not in options:
             selected = next(iter(options))
@@ -1210,7 +1234,7 @@ class App(tk.Tk):
                                  "workers": workers, "language": current_language(),
                                  "pacing": pacing, "aria2": accelerated,
                                  "by_artist": self.by_artist_var.get(),
-                                 "fallback": self.fallback_var.get()})
+                                 "fallback": self.fallback_var.get(), "source": self.source})
         save_config(self.config_data)
 
         self.run_id += 1
@@ -1238,7 +1262,7 @@ class App(tk.Tk):
             opts = build_options(mode, quality, folder, self.playlist_var.get(), self.ffmpeg_dir,
                                  accelerated, self.by_artist_var.get(), pacing)
             target, args = self._run, (self.run_id, self.cancel_event, url, mode, opts, workers, pacing,
-                                       self.fallback_var.get())
+                                       self.fallback_var.get(), self.source)
         self.worker = threading.Thread(target=target, args=args, daemon=True)
         self.worker.start()
 
@@ -1315,8 +1339,14 @@ class App(tk.Tk):
             emit("log", f"✖ {reason}", "error")
             emit("done", tr("failed", reason=reason), True)
 
-    def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True, fallback=True):
-        done, skipped, repeated, alternatives = [], [], [], []
+    def _run(self, run_id, cancel, url, mode, opts, workers, pacing=True, fallback=True, source="youtube"):
+        done, skipped, repeated, alternatives, soundcloud = [], [], [], [], []
+        # Fonte das músicas (só no formato Música): "soundcloud" baixa tudo de lá; "auto" usa o
+        # YouTube e, se ele bloquear, passa o resto da lista para o SoundCloud.
+        music_switch = mode == "audio" and source in ("auto", "soundcloud")
+        soundcloud_only = threading.Event()
+        if mode == "audio" and source == "soundcloud":
+            soundcloud_only.set()
         finished = []  # itens que já terminaram, com sucesso ou não (para a barra de progresso)
         failures = []  # (posição, nome, motivo) — viram a lista de erros no final
         skipped_files = set()  # arquivos (caminho completo) que já estavam na pasta antes
@@ -1449,26 +1479,41 @@ class App(tk.Tk):
                 emit("log", tr("aria2_retry" if plain else "retry_403", name=name), "warn")
             return error
 
-        def alternative_candidates(entry, query):
-            """Outras versões da mesma música: primeiro no YouTube, depois no SoundCloud.
+        def song_query(entry):
+            """(artista, música, texto de busca) de um item da lista."""
+            spotify = entry.get("extra") or {}
+            if spotify.get("spotify_title"):
+                artist, title = (spotify.get("spotify_artist") or "").split(",")[0].strip(), spotify["spotify_title"]
+            else:
+                title = entry.get("title") or ""
+                if not title or title.startswith("http"):
+                    return "", "", ""
+                artist = "" if _SEPARATOR.match(title) else clean_artist(entry.get("channel") or entry.get("uploader"))
+                if artist == tr("unknown_artist"):
+                    artist = ""
+            return artist, title, f"{artist} - {title}" if artist else title
+
+        def candidates(entry, title, query, sources):
+            """Versões da mesma música encontradas nas fontes, na ordem.
 
             Só aceita versões com duração parecida com a original (evita prévias de 30 s e
             músicas erradas) e que não sejam versões alteradas (slowed, 8D, cover…), a não
             ser que a original também seja.
             """
             want = entry.get("duration")
-            altered_ok = bool(_VARIANT.search(entry.get("title") or ""))
-            for prefix, source in (("ytsearch5", "YouTube"), ("scsearch5", "SoundCloud")):
+            altered_ok = is_variant(title)
+            for source in sources:
                 check_cancel()
                 if source == "YouTube":
                     wait_for_youtube("ytsearch:")
+                prefix = "ytsearch5" if source == "YouTube" else "scsearch8"
                 try:
                     with new_ydl() as ydl:
                         found = ydl.extract_info(f"{prefix}:{query}", download=False, process=False)
                         for result in [r for r in (found or {}).get("entries") or [] if r]:
                             if result.get("id") == entry.get("id"):
                                 continue
-                            if not altered_ok and _VARIANT.search(result.get("title") or ""):
+                            if not altered_ok and is_variant(result.get("title")):
                                 continue
                             got = result.get("duration")
                             if got is None and source == "SoundCloud":
@@ -1484,34 +1529,38 @@ class App(tk.Tk):
                 except Exception:  # noqa: BLE001 — essa fonte não deu; tenta a próxima
                     continue
 
-        def try_alternatives(index, entry, extra, error):
-            """O vídeo original não serve: baixa outra versão da mesma música (até 2 tentativas)."""
-            title = entry.get("title") or ""
-            if not title or title.startswith("http"):
-                local.no_alt = True
-                return error
-            artist = "" if _SEPARATOR.match(title) else clean_artist(entry.get("channel") or entry.get("uploader"))
-            if artist == tr("unknown_artist"):
-                artist = ""
-            query = f"{artist} - {title}" if artist else title
-            for tries, (candidate, source) in enumerate(alternative_candidates(entry, query)):
-                if tries == 2:
-                    break
-                emit("log", tr("alt_found", index=index, name=title, source=source,
-                               alt=candidate.get("title") or "?"), "info")
-                alt_extra = dict(extra)
-                if artist:  # mantém o nome da música original, não o do vídeo encontrado
-                    alt_extra.update(spotify_artist=artist, spotify_title=title)
-                if source == "YouTube":
-                    wait_for_youtube(candidate.get("url") or "")
-                alt_error = attempt(candidate, alt_extra)
-                if local.ok:
-                    alternatives.append(title)
-                    return None
-                if error_kind(alt_error) in STOP_KINDS:
-                    return alt_error
+        def download_found(index, entry, extra, sources, message):
+            """Procura a música nas fontes e baixa a primeira versão que servir (até 2 tentativas).
+            Devolve None se baixou, senão o erro da última tentativa."""
+            artist, title, query = song_query(entry)
+            error = None
+            if query:
+                found = candidates(entry, title, query, sources)
+                for tries, (candidate, source) in enumerate(found):
+                    if tries == 2:
+                        break
+                    emit("log", tr(message, index=index, name=title, source=source,
+                                   alt=candidate.get("title") or "?"), "info")
+                    alt_extra = dict(extra)
+                    if artist:  # mantém o nome da música original, não o do vídeo encontrado
+                        alt_extra.update(spotify_artist=artist, spotify_title=title)
+                    if source == "YouTube":
+                        wait_for_youtube(candidate.get("url") or "")
+                    error = attempt(candidate, alt_extra)
+                    if local.ok:
+                        return None
+                    if error_kind(error) in STOP_KINDS:
+                        return error
             local.no_alt = True
             return error
+
+        def from_soundcloud(index, entry, extra):
+            """Baixa a música do SoundCloud, sem pedir nada ao YouTube."""
+            error = download_found(index, entry, extra, ("SoundCloud",), "sc_download")
+            if local.ok:
+                soundcloud.append(index)
+                return None
+            return error or tr("sc_none")
 
         def download_entry(index, entry, extra):
             name = entry.get("title") or entry.get("url") or "?"
@@ -1537,19 +1586,35 @@ class App(tk.Tk):
             cancelled, error = False, None
             try:
                 check_cancel()
-                wait_for_youtube(entry.get("url") or entry.get("webpage_url"))
-                target = entry
-                if entry.get("search"):  # veio do Spotify: procura a música no YouTube
-                    with new_ydl() as ydl:
-                        found = ydl.extract_info(entry["url"], download=False, process=False)
-                    results = [r for r in (found or {}).get("entries") or [] if r]
-                    if not results:
-                        raise LookupError(tr("not_found_youtube"))
-                    target = results[0]
-                error = attempt(target, extra)
-                if (not local.ok and fallback and mode == "audio" and not entry.get("search")
-                        and error_kind(error) in FALLBACK_KINDS):
-                    error = try_alternatives(index, entry, extra, error)
+                if music_switch and soundcloud_only.is_set():
+                    error = from_soundcloud(index, entry, extra)
+                else:
+                    wait_for_youtube(entry.get("url") or entry.get("webpage_url"))
+                    target = entry
+                    if entry.get("search"):  # veio do Spotify: procura a música no YouTube
+                        with new_ydl() as ydl:
+                            found = ydl.extract_info(entry["url"], download=False, process=False)
+                        results = [r for r in (found or {}).get("entries") or [] if r]
+                        if not results:
+                            raise LookupError(tr("not_found_youtube"))
+                        target = results[0]
+                    error = attempt(target, extra)
+                    if (not local.ok and fallback and mode == "audio" and not entry.get("search")
+                            and error_kind(error) in FALLBACK_KINDS):
+                        alt_error = download_found(index, entry, extra, ("YouTube", "SoundCloud"), "alt_found")
+                        if local.ok:
+                            alternatives.append(index)
+                            error = None
+                        elif error_kind(alt_error) in STOP_KINDS:
+                            error = alt_error
+                    # O YouTube bloqueou: no modo Automático, este item e o resto da lista
+                    # continuam pelo SoundCloud, sem esperar.
+                    if not local.ok and music_switch and error_kind(error) in YOUTUBE_BLOCKS:
+                        if not soundcloud_only.is_set():
+                            soundcloud_only.set()
+                            emit("log", tr("switch_soundcloud"), "warn")
+                        local.no_alt = False
+                        error = from_soundcloud(index, entry, extra)
             except AlreadyInThisRun as exc:
                 local.ok = True
                 repeated.append(str(exc))
@@ -1562,10 +1627,11 @@ class App(tk.Tk):
             cancelled = cancelled or cancel.is_set()
             finished.append(index)
             if not cancelled and not local.ok:
-                if error_kind(error) in STOP_KINDS:
-                    stop(error_kind(error))
+                kind = error_kind(error)
+                if kind in STOP_KINDS and not (music_switch and kind in YOUTUBE_BLOCKS):
+                    stop(kind)
                 reason = explain_error(error)
-                if local.no_alt and fallback and mode == "audio":
+                if local.no_alt and fallback and mode == "audio" and error != tr("sc_none"):
                     reason += tr("alt_none")
                 fail(index, name, reason)
                 if local.file:  # não deixa pedaços (.part, .webm, capa) desse item na pasta
@@ -1615,6 +1681,12 @@ class App(tk.Tk):
                     else:
                         entries = None
                         emit("log", tr("sequential"), "info")
+                elif probe and soundcloud_only.is_set():
+                    # Música avulsa no modo "Só SoundCloud": usa o nome dela para buscar lá.
+                    entries, is_list, title = [{
+                        "id": probe.get("id"), "title": probe.get("track") or probe.get("title"),
+                        "channel": (probe.get("artists") or [None])[0] or probe.get("channel"),
+                        "duration": probe.get("duration"), "url": url}], False, probe.get("title")
             check_cancel()
 
             if entries is not None:
@@ -1633,7 +1705,7 @@ class App(tk.Tk):
                     emit("log", tr("repeated_skipped", n=len(entries) - len(unique)), "warn")
                 entries = unique
                 youtube_items = sum(is_youtube(e.get("url") or e.get("webpage_url")) for e in entries)
-                if pacing and self.pacer.used() + youtube_items > YouTubePacer.LIMIT:
+                if pacing and not soundcloud_only.is_set() and self.pacer.used() + youtube_items > YouTubePacer.LIMIT:
                     emit("log", tr("pacing_big_list"), "info")
                 total["n"] = max(1, len(entries))
                 emit("progress", 0, tr("ready_count", done=0, total=len(entries)) + tr("starting"))
@@ -1652,6 +1724,8 @@ class App(tk.Tk):
                 summary = tr("sum_done", n=len(done))
                 if alternatives:
                     summary += tr("sum_alternative", n=len(alternatives))
+                if soundcloud:
+                    summary += tr("sum_soundcloud", n=len(soundcloud))
                 if skipped:
                     summary += tr("sum_skipped", n=len(skipped))
                 if repeated:
